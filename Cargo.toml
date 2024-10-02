@@ -7,4 +7,4 @@ description = "ESM file parser"
 
 [dependencies]
 chunk-parser = { git = "https://github.com/StealthOfKing/rust-chunk-parser.git" }
-esm-bindings = { path = "https://github.com/trutrix/esm-bindings.git" }
+esm-bindings = { git = "https://github.com/trutrix/esm-bindings.git" }
