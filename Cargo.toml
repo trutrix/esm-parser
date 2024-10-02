@@ -1,0 +1,10 @@
+[package]
+name = "esm-parser"
+version = "0.1.0"
+authors = ["tRuTrIx <trutrix@monocyte.host>", "StealthOfKing <sok@monocyte.host>"]
+edition = "2021"
+description = "ESM file parser"
+
+[dependencies]
+chunk-parser = { git = "https://github.com/StealthOfKing/rust-chunk-parser.git" }
+esm-bindings = { path = "https://github.com/trutrix/esm-bindings.git" }
