@@ -2,11 +2,14 @@
 
 use chunk_parser::prelude::*;
 use esm_bindings::*;
+use std::ffi::CString;
 
 //------------------------------------------------------------------------------
 
 #[chunk_parser]
-pub struct ESMParser;
+pub struct ESMParser {
+    localised: bool
+}
 
 /// Elder Scrolls Mod parser implementation.
 impl<R> Parser for ESMParser<R> where R: std::io::Read + std::io::Seek {
@@ -51,42 +54,173 @@ impl<R> Parser for ESMParser<R> where R: std::io::Read + std::io::Seek {
     }
 }
 
+type RecordParser<P> = fn(parser: &mut P, header: &RecordHeader) -> chunk_parser::Result<()>;
+type FieldParser<P> = fn(parser: &mut P, header: &FieldHeader) -> chunk_parser::Result<()>;
+
 impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
-    #[allow(non_snake_case)]
-    pub fn TES4(&mut self, ( typeid, size ): &<ESMParser<R> as Parser>::Header) -> chunk_parser::Result<u32> {
-        match typeid {
+    fn read_zstring(&mut self, length: u16) -> chunk_parser::Result<CString> {
+        let mut v = Vec::with_capacity(length as usize);
+        unsafe {
+            let ptr = v.as_mut_ptr();
+            self.reader().read_exact(std::slice::from_raw_parts_mut(ptr, length as usize))?;
+            v.set_len(length as usize);
+        }
+        Ok(unsafe { CString::from_vec_unchecked(v) })
+    }
+    fn read_lstring(&mut self, length: u16) -> chunk_parser::Result<CString> {
+        if self.localised { panic!("unimplemented lstring");  }
+        else { self.read_zstring(length) }
+    }
+
+    pub fn fo3(&mut self, header: &RecordHeader) -> chunk_parser::Result<()> {
+        println!("{:?}", header);
+        let RecordHeader { size, type_id, flags, .. } = *header;
+        match &type_id.0 {
             b"TES4" => {
-                let header: RecordHeader = self.read_fast()?;
-                println!("{:?}", header);
-                self.skip(*size - 16)?;
+                if (flags & 0x00000001) != 0 {} // Master (ESM) file
+                self.localised = (flags & 0x00000080) != 0;
+                if (flags & 0x00000200) != 0 {} // Light Master (ESL) File
+                self.parse_fields(|parser, header| {
+                    print!("    {:?}", header);
+                    match &header.type_id.0 {
+                        b"HEDR" => {
+                            let HEDR: HEDR = parser.read_fast()?;
+                            println!(" {:?}", HEDR);
+                        },
+                        b"CNAM" => {
+                            let CNAM = parser.read_zstring(header.size)?;
+                            println!(" {:?}", CNAM);
+                        },
+                        b"MAST" => {
+                            let MAST = parser.read_zstring(header.size)?;
+                            println!(" {:?}", MAST);
+                        },
+                        b"DATA" => {
+                            let DATA: u64 = parser.read_fast()?;
+                            println!(" {:?}", DATA);
+                        },
+                        b"ONAM" => {
+                            parser.skip(header.size as u32)?;
+                            println!(" unimplemented");
+                        },
+                        _ => { println!(" Unknown typeid '{}'", header.type_id) }
+                    }
+                    Ok(())
+                }, size)?;
             },
             b"GRUP" => {
-                let header: GroupHeader = self.read_fast()?;
-                println!("{:?}", header);
-                self.skip(*size - 16)?;
+                let GRUP: GroupHeader = self.read_fast()?;
+                println!("    {:?}", GRUP);
+                self.skip(size - 24)?;
             },
-            b"GLOB" => { self.skip(*size)?; },
-            b"FACT" => { self.skip(*size)?; },
-            b"ASPC" => { self.skip(*size)?; },
-            b"SCPT" => { self.skip(*size)?; },
-            b"SPEL" => { self.skip(*size)?; },
-            b"TACT" => { self.skip(*size)?; },
-            b"ARMO" => { self.skip(*size)?; },
-            b"DOOR" => { self.skip(*size)?; },
-            b"MISC" => { self.skip(*size)?; },
-            b"SCOL" => { self.skip(*size)?; },
-            b"PWAT" => { self.skip(*size)?; },
-            b"WEAP" => { self.skip(*size)?; },
-            b"NPC_" => { self.skip(*size)?; },
-            b"LVLC" => { self.skip(*size)?; },
-            b"IDLM" => { self.skip(*size)?; },
-            b"PROJ" => { self.skip(*size)?; },
-            b"REGN" => { self.skip(*size)?; },
-            b"CELL" => { self.skip(*size)?; },
-            //b"EDID" => { self.skip(*size)?; },
-            _ => { self.guesser(&( *typeid, *size ))?; }
+            b"GLOB" => {
+                self.parse_fields(|parser, header| {
+                    print!("    {:?}", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!(" {:?}", EDID);
+                        },
+                        b"FNAM" => {
+                            let FNAM: u8 = parser.read_fast()?;
+                            println!(" {:?}", FNAM);
+                        },
+                        b"FLTV" => {
+                            let FLTV: f32 = parser.read_fast()?;
+                            println!(" {:?}", FLTV);
+                        },
+                        _ => {
+                            parser.skip(header.size as u32)?;
+                            println!(" Unknown typeid '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"FACT" => {
+                self.parse_fields(|parser, header| {
+                    print!("    {:?}", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!(" {:?}", EDID);
+                        },
+                        b"FULL" => {
+                            let FULL = parser.read_lstring(header.size)?;
+                            println!(" {:?}", FULL);
+                        },
+                        b"XNAM" => {
+                            let XNAM: XNAM = parser.read_fast()?;
+                            println!(" {:?}", XNAM);
+                        },
+                        b"DATA" => {
+                            let DATA: u32 = parser.read_fast()?;
+                            println!(" {:#010x}", DATA);
+                        },
+
+                        _ => {
+                            parser.skip(header.size as u32)?;
+                            println!(" Unknown typeid '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"ASPC" => { self.skip(size)?; },
+            b"SCPT" => { self.skip(size)?; },
+            b"SPEL" => { self.skip(size)?; },
+            b"TACT" => { self.skip(size)?; },
+            b"ARMO" => { self.skip(size)?; },
+            b"DOOR" => { self.skip(size)?; },
+            b"MISC" => { self.skip(size)?; },
+            b"SCOL" => { self.skip(size)?; },
+            b"PWAT" => { self.skip(size)?; },
+            b"WEAP" => { self.skip(size)?; },
+            b"NPC_" => { self.skip(size)?; },
+            b"LVLC" => { self.skip(size)?; },
+            b"IDLM" => { self.skip(size)?; },
+            b"PROJ" => { self.skip(size)?; },
+            b"REGN" => { self.skip(size)?; },
+            b"CELL" => { self.skip(size)?; },
+            _ => {
+                self.skip(size)?;
+                println!("Unknown typeid '{}'", type_id);
+            }
         }
-        Ok(*size)
+        Ok(())
+    }
+
+    pub fn parse_fields(&mut self, f: FieldParser<Self>, total_size: u32) -> chunk_parser::Result<()> {
+        let loop_end = self.reader().stream_position()? + total_size as u64;
+        loop {
+            let header: FieldHeader = self.read_fast()?;
+            let start = self.reader().stream_position()?;
+            let size = header.size as u64;
+            f(self, &header)?; // the parser function is responsible for parsing the size
+            let end = start + size;
+            let pos = self.reader().stream_position()?;
+            if pos == loop_end { break Ok(()); } // function consumed chunk
+            else if pos != end { return Err(chunk_parser::Error::ParseError); } // function made a mistake
+        }
+    }
+
+    fn parse_records_loop(&mut self, f: RecordParser<Self>, total_size: u64) -> chunk_parser::Result<()> {
+        loop {
+            let start = self.reader().stream_position()?;
+            let header: RecordHeader = self.read_fast()?;
+            let size = header.size as u64 + 24;
+            f(self, &header)?; // the parser function is responsible for parsing the size
+            let end = start + size;
+            let pos = self.reader().stream_position()?;
+            if pos == total_size { break Ok(()); } // function consumed chunk
+            else if pos != end { return Err(chunk_parser::Error::ParseError); } // function made a mistake
+        }
+    }
+
+    pub fn parse_records(&mut self, f: RecordParser<Self>) -> chunk_parser::Result<()> {
+        let total_size = self.reader().seek(std::io::SeekFrom::End(0))?;
+        self.reader().seek(std::io::SeekFrom::Start(0))?;
+        self.parse_records_loop(f, total_size)
     }
 }
 
@@ -105,9 +239,9 @@ mod tests {
 
     #[test]
     #[allow(non_snake_case)]
-    fn Zeta() {
+    fn Zeta() -> chunk_parser::Result<()> {
         const DATA: &[u8] = include_bytes!("../data/Zeta.esm");
         let mut esm = ESMParser::buf(DATA);
-        esm.parse(ESMParser::TES4).unwrap();
+        esm.parse_records(ESMParser::fo3)
     }
 }
