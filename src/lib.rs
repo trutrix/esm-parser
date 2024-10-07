@@ -1,29 +1,21 @@
-//! Elder Scrolls Mod file parser.
+//! Elder Scrolls Master file parser.
 
 #![allow(non_snake_case)]
 
 use chunk_parser::prelude::*;
 pub use chunk_parser::Result;
-use esm_bindings::*;
+use esm_bindings::fo3::*;
+
 use std::ffi::CString;
+use std::io::Read;
+
+use flate2::read::ZlibDecoder;
 
 //------------------------------------------------------------------------------
 
-#[chunk_parser]
+#[chunk_parser(custom,depth)]
 pub struct ESMParser {
     localised: bool
-}
-
-// TODO: this pattern is actually unused now and can be traited out of the base parser implementation
-impl<R> Parser for ESMParser<R> where R: std::io::Read + std::io::Seek {
-    type Header = (TypeId, u32);
-    type Size = u32;
-
-    fn read_header(&mut self) -> Result<Self::Header>
-        { Err(chunk_parser::Error::Unimplemented) }
-
-    fn guesser(&mut self, _header: &Self::Header) -> Result<u32>
-        { Err(chunk_parser::Error::Unimplemented) }
 }
 
 type RecordParser<P> = fn(parser: &mut P, header: &RecordHeader) -> Result<()>;
@@ -31,19 +23,20 @@ type FieldParser<P> = fn(parser: &mut P, header: &FieldHeader) -> Result<()>;
 
 macro_rules! indent {
     ($parser:expr, $($arg:tt)*) => {
-        let indent = " ".repeat($parser.depth() * 2);
+        let indent = " ".repeat($parser.depth() as usize * 2);
         print!("{}{}", indent, format!($($arg)*));
     };
 }
 macro_rules! indentln {
     ($parser:expr, $($arg:tt)*) => {
-        let indent = " ".repeat($parser.depth() * 2);
+        let indent = " ".repeat($parser.depth() as usize * 2);
         println!("{}{}", indent, format!($($arg)*));
     };
 }
 
-/// Elder Scrolls Mod parser implementation.
+/// Elder Scrolls Master parser implementation.
 impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
+    /// Read a fixed sized string.
     fn read_zstring(&mut self, length: u16) -> Result<CString> {
         let mut v = Vec::with_capacity(length as usize);
         unsafe {
@@ -54,14 +47,71 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
         Ok(unsafe { CString::from_vec_unchecked(v) })
     }
 
+    /// Read a potentially localised string.
     fn read_lstring(&mut self, length: u16) -> Result<CString> {
         if self.localised { panic!("unimplemented lstring");  }
         else { self.read_zstring(length) }
     }
 
+    /// Decompress a Zlib buffer.
+    fn deflate(&mut self, size: usize) -> Result<Vec<u8>> {
+        let mut v = Vec::with_capacity(size);
+        unsafe {
+            let ptr = v.as_mut_ptr();
+            self.reader().read_exact(std::slice::from_raw_parts_mut(ptr, size))?;
+            v.set_len(size);
+        }
+        let mut decoder = ZlibDecoder::new(&v[..]);
+        let mut decompressed_data = Vec::new();
+        decoder.read_to_end(&mut decompressed_data)?;
+        Ok(decompressed_data)
+    }
+
     pub fn GRUP(&mut self, header: &RecordHeader) -> Result<()> {
-        let RecordHeader { size, type_id, .. } = *header;
-        indentln!(self, "{:?}", header);
+        let RecordHeader { size, type_id, flags, .. } = *header;
+        if type_id != b"REFR" {
+            indentln!(self, "{:?}", header);
+        }
+
+        if (flags & 0x00040000) != 0 {
+            let uncompressed_size: u32 = self.read()?;
+            let decompressed = &self.deflate(size as usize - 4)?;
+            let reader = std::io::Cursor::new(decompressed);
+            let mut parser = ESMParser::new(reader);
+            *parser.inner_depth() = self.depth();
+            parser.localised = self.localised;
+            parser.push();
+            // this block is for the first compressed record, NPC_
+            parser.parse_fields(|parser, header| {
+                indent!(parser, "{:?} ", header);
+                match &header.type_id.0 {
+                    b"EDID" => {
+                        let EDID = parser.read_zstring(header.size)?;
+                        println!("{:?}", EDID);
+                    },
+                    b"FULL" => {
+                        let FULL = parser.read_lstring(header.size)?;
+                        println!("{:?}", FULL);
+                    },
+                    b"OBND" => {
+                        let OBND: OBND = parser.read()?;
+                        println!("{:?}", OBND);
+                    },
+                    b"MODL" => {
+                        let MODL = parser.read_zstring(header.size)?;
+                        println!("{:?}", MODL);
+                    },
+                    _ => {
+                        parser.skip(header.size as u64)?;
+                        println!("Unknown field '{}'", header.type_id);
+                    }
+                }
+                Ok(())
+            }, decompressed.len() as u32)?;
+            parser.pop();
+            return Ok(())
+        }
+
         match &type_id.0 {
             b"GLOB" => {
                 self.parse_fields(|parser, header| {
@@ -72,15 +122,15 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         b"FNAM" => {
-                            let FNAM: u8 = parser.read_fast()?;
+                            let FNAM: u8 = parser.read()?;
                             println!("{:?}", FNAM);
                         },
                         b"FLTV" => {
-                            let FLTV: f32 = parser.read_fast()?;
+                            let FLTV: f32 = parser.read()?;
                             println!("{:?}", FLTV);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -100,15 +150,15 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"XNAM" => {
-                            let XNAM: XNAM = parser.read_fast()?;
+                            let XNAM: XNAM = parser.read()?;
                             println!("{:?}", XNAM);
                         },
                         b"DATA" => {
-                            let DATA: u32 = parser.read_fast()?;
+                            let DATA: u32 = parser.read()?;
                             println!("{:#010x}", DATA);
                         },
                         b"RNAM" => {
-                            let RNAM: u32 = parser.read_fast()?;
+                            let RNAM: u32 = parser.read()?;
                             println!("{:#010x}", RNAM);
                         },
                         b"MNAM" => {
@@ -120,7 +170,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FNAM);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -136,7 +186,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         tx if tx >= b"TX00" && tx <= b"TX07" => {
@@ -144,15 +194,15 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", TX);
                         },
                         b"DNAM" => {
-                            let DNAM: u16 = parser.read_fast()?;
+                            let DNAM: u16 = parser.read()?;
                             println!("{:?}", DNAM);
                         },
                         /*b"DODT" => {
-                            let DODT: DODT = parser.read_fast()?;
+                            let DODT: DODT = parser.read()?;
                             println!("{:?}", DODT);
                         },*/
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!(" Unknown field '{}'", header.type_id);
                         }
                     }
@@ -180,15 +230,15 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", ICON);
                         },*/
                         b"DATA" => {
-                            let CLAS: CLAS = parser.read_fast()?;
+                            let CLAS: CLAS = parser.read()?;
                             println!("{:?}", CLAS);
                         },
                         b"ATTR" => {
-                            let ATTR: ATTR = parser.read_fast()?;
+                            let ATTR: ATTR = parser.read()?;
                             println!("{:?}", ATTR);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -204,7 +254,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"FNAM" => {
@@ -212,15 +262,15 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FNAM);
                         },
                         b"SNDD" => {
-                            let SNDD: SNDD = parser.read_fast()?;
+                            let SNDD: SNDD = parser.read()?;
                             println!("{:?}", SNDD);
                         },
                         b"SDSC" => {
-                            let SDSC: formid_t = parser.read_fast()?;
+                            let SDSC: formid_t = parser.read()?;
                             println!("{:?}", SDSC);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -236,27 +286,27 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"SNAM" => {
-                            let SNAM: formid_t = parser.read_fast()?;
+                            let SNAM: formid_t = parser.read()?;
                             println!("{:?}", SNAM);
                         },
                         b"RDAT" => {
-                            let RDAT: formid_t = parser.read_fast()?;
+                            let RDAT: formid_t = parser.read()?;
                             println!("{:?}", RDAT);
                         },
                         b"BNAM" => {
-                            let BNAM: formid_t = parser.read_fast()?;
+                            let BNAM: formid_t = parser.read()?;
                             println!("{:?}", BNAM);
                         },
                         b"ANAM" => {
-                            let ANAM: [u8;4] = parser.read_fast()?;
+                            let ANAM: [u8;4] = parser.read()?;
                             println!("ANAM {{ unknown: {:?} }}", ANAM);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -281,20 +331,20 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", DESC);
                         },
                         /*b"MDOB" => {
-                            let MDOB: formid_t = parser.read_fast()?;
+                            let MDOB: formid_t = parser.read()?;
                             println!("{:?}", MDOB);
                         },
                         b"KSIZ" => {
-                            let KSIZ: u32 = parser.read_fast()?;
+                            let KSIZ: u32 = parser.read()?;
                             println!("{:?}", KSIZ);
                         },
                         b"KWDA" => {},*/
                         b"DATA" => {
-                            let MGEF: MGEF = parser.read_fast()?;
+                            let MGEF: MGEF = parser.read()?;
                             println!("{:?}", MGEF);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -314,23 +364,23 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"ENIT" => {
-                            let ENIT: ENIT = parser.read_fast()?;
+                            let ENIT: ENIT = parser.read()?;
                             println!("{:?}", ENIT);
                         },
                         b"EFID" => {
-                            let EFID: formid_t = parser.read_fast()?;
+                            let EFID: formid_t = parser.read()?;
                             println!("{:?}", EFID);
                         },
                         b"EFIT" => {
-                            let EFIT: EFIT = parser.read_fast()?;
+                            let EFIT: EFIT = parser.read()?;
                             println!("{:?}", EFIT);
                         },
                         /*b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },*/
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -354,27 +404,27 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"SPIT" => {
-                            let SPIT: SPIT = parser.read_fast()?;
+                            let SPIT: SPIT = parser.read()?;
                             println!("{:?}", SPIT);
                         },
                         b"EFID" => {
-                            let EFID: formid_t = parser.read_fast()?;
+                            let EFID: formid_t = parser.read()?;
                             println!("{:?}", EFID);
                         },
                         b"EFIT" => {
-                            let EFIT: EFIT = parser.read_fast()?;
+                            let EFIT: EFIT = parser.read()?;
                             println!("{:?}", EFIT);
                         },
                         b"CTDA" => {
-                            let CTDA: CTDA = parser.read_fast()?;
+                            let CTDA: CTDA = parser.read()?;
                             println!("{:?}", CTDA);
                         },
                         /*b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },*/
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -394,15 +444,15 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"SCRI" => {
-                            let SCRI: formid_t = parser.read_fast()?;
+                            let SCRI: formid_t = parser.read()?;
                             println!("{:?}", SCRI);
                         },
                         b"VNAM" => {
-                            let VNAM: formid_t = parser.read_fast()?;
+                            let VNAM: formid_t = parser.read()?;
                             println!("{:?}", VNAM);
                         },
                         b"MODL" => {
@@ -410,15 +460,15 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         b"SNAM" => {
-                            let SNAM: formid_t = parser.read_fast()?;
+                            let SNAM: formid_t = parser.read()?;
                             println!("{:?}", SNAM);
                         },
                         b"DEST" => {
-                            let DEST: [u8;8] = parser.read_fast()?;
+                            let DEST: [u8;8] = parser.read()?;
                             println!("DEST {{ unknown: {:?} }}", DEST);
                         },
                         b"DSTD" => {
-                            let DSTD: DSTD = parser.read_fast()?;
+                            let DSTD: DSTD = parser.read()?;
                             println!("{:?}", DSTD);
                         },
                         b"DSTF" => {
@@ -429,7 +479,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", DMDL);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -449,7 +499,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -461,7 +511,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", DESC);
                         },
                         b"CTDA" => {
-                            let CTDA: CTDA = parser.read_fast()?;
+                            let CTDA: CTDA = parser.read()?;
                             println!("{:?}", CTDA);
                         },
                         b"RNAM" => {
@@ -473,15 +523,15 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", ITXT);
                         },
                         b"SNAM" => {
-                            let SNAM: formid_t = parser.read_fast()?;
+                            let SNAM: formid_t = parser.read()?;
                             println!("{:?}", SNAM);
                         },
                         b"SCHR" => {
-                            let SCHR: SCHR = parser.read_fast()?;
+                            let SCHR: SCHR = parser.read()?;
                             println!("{:?}", SCHR);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -501,7 +551,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -509,23 +559,23 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         b"SCRI" => {
-                            let SCRI: formid_t = parser.read_fast()?;
+                            let SCRI: formid_t = parser.read()?;
                             println!("{:?}", SCRI);
                         },
                         b"DATA" => {
-                            let DATA: [u8;5] = parser.read_fast()?;
+                            let DATA: [u8;5] = parser.read()?;
                             println!("DATA {{ unknown: {:?} }}", DATA);
                         },
                         b"CNTO" => {
-                            let CNTO: CNTO = parser.read_fast()?;
+                            let CNTO: CNTO = parser.read()?;
                             println!("{:?}", CNTO);
                         },
                         b"COED" => {
-                            let COED: COED = parser.read_fast()?;
+                            let COED: COED = parser.read()?;
                             println!("{:?}", COED);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -541,7 +591,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -549,11 +599,11 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         b"SCRI" => {
-                            let SCRI: formid_t = parser.read_fast()?;
+                            let SCRI: formid_t = parser.read()?;
                             println!("{:?}", SCRI);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -569,7 +619,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -581,7 +631,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", ICON);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -601,7 +651,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -609,7 +659,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -629,7 +679,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -637,11 +687,11 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         b"DATA" => {
-                            let DATA: u8 = parser.read_fast()?;
+                            let DATA: u8 = parser.read()?;
                             println!("{:?}", DATA);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -657,7 +707,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -665,7 +715,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -685,7 +735,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -693,11 +743,11 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         b"MNAM" => {
-                            let MNAM: u32 = parser.read_fast()?;
+                            let MNAM: u32 = parser.read()?;
                             println!("{:?}", MNAM);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -717,7 +767,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -741,51 +791,51 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", ICON);
                         },
                         b"CRDT" => {
-                            let CRDT: CRDT = parser.read_fast()?;
+                            let CRDT: CRDT = parser.read()?;
                             println!("{:?}", CRDT);
                         },
                         b"EITM" => {
-                            let EITM: formid_t = parser.read_fast()?;
+                            let EITM: formid_t = parser.read()?;
                             println!("{:?}", EITM);
                         },
                         b"ETYP" => {
-                            let ETYP: u32 = parser.read_fast()?;
+                            let ETYP: u32 = parser.read()?;
                             println!("{:?}", ETYP);
                         },
                         b"DATA" => {
-                            let DATA: DATA = parser.read_fast()?;
+                            let DATA: DATA = parser.read()?;
                             println!("{:?}", DATA);
                         },
                         b"REPL" => {
-                            let REPL: formid_t = parser.read_fast()?;
+                            let REPL: formid_t = parser.read()?;
                             println!("{:?}", REPL);
                         },
                         b"SCRI" => {
-                            let SCRI: formid_t = parser.read_fast()?;
+                            let SCRI: formid_t = parser.read()?;
                             println!("{:?}", SCRI);
                         },
                         b"NAM0" => {
-                            let NAM0: formid_t = parser.read_fast()?;
+                            let NAM0: formid_t = parser.read()?;
                             println!("{:?}", NAM0);
                         },
                         b"NAM6" => {
-                            let NAM6: formid_t = parser.read_fast()?;
+                            let NAM6: formid_t = parser.read()?;
                             println!("{:?}", NAM6);
                         },
                         b"NAM8" => {
-                            let NAM8: formid_t = parser.read_fast()?;
+                            let NAM8: formid_t = parser.read()?;
                             println!("{:?}", NAM8);
                         },
                         b"NAM9" => {
-                            let NAM9: formid_t = parser.read_fast()?;
+                            let NAM9: formid_t = parser.read()?;
                             println!("{:?}", NAM9);
                         },
                         b"DNAM" => {
-                            let DNAM: DNAM = parser.read_fast()?;
+                            let DNAM: DNAM = parser.read()?;
                             println!("{:?}", DNAM);
                         },
                         b"INAM" => {
-                            let INAM: formid_t = parser.read_fast()?;
+                            let INAM: formid_t = parser.read()?;
                             println!("{:?}", INAM);
                         },
                         b"NNAM" => {
@@ -793,39 +843,39 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", NNAM);
                         },
                         b"SNAM" => {
-                            let SNAM: formid_t = parser.read_fast()?;
+                            let SNAM: formid_t = parser.read()?;
                             println!("{:?}", SNAM);
                         },
                         b"TNAM" => {
-                            let TNAM: formid_t = parser.read_fast()?;
+                            let TNAM: formid_t = parser.read()?;
                             println!("{:?}", TNAM);
                         },
                         b"UNAM" => {
-                            let UNAM: formid_t = parser.read_fast()?;
+                            let UNAM: formid_t = parser.read()?;
                             println!("{:?}", UNAM);
                         },
                         b"VNAM" => {
-                            let VNAM: u32 = parser.read_fast()?;
+                            let VNAM: u32 = parser.read()?;
                             println!("{:?}", VNAM);
                         },
                         b"WNAM" => {
-                            let WNAM: formid_t = parser.read_fast()?;
+                            let WNAM: formid_t = parser.read()?;
                             println!("{:?}", WNAM);
                         },
                         b"XNAM" => {
-                            let XNAM: formid_t = parser.read_fast()?;
+                            let XNAM: formid_t = parser.read()?;
                             println!("{:?}", XNAM);
                         },
                         b"YNAM" => {
-                            let YNAM: formid_t = parser.read_fast()?;
+                            let YNAM: formid_t = parser.read()?;
                             println!("{:?}", YNAM);
                         },
                         b"ZNAM" => {
-                            let ZNAM: formid_t = parser.read_fast()?;
+                            let ZNAM: formid_t = parser.read()?;
                             println!("{:?}", ZNAM);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -845,7 +895,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -857,7 +907,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", ICON);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -877,11 +927,11 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -897,11 +947,11 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -921,7 +971,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -933,19 +983,19 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", ICON);
                         },
                         b"EFID" => {
-                            let EFID: formid_t = parser.read_fast()?;
+                            let EFID: formid_t = parser.read()?;
                             println!("{:?}", EFID);
                         },
                         b"EFIT" => {
-                            let EFIT: EFIT = parser.read_fast()?;
+                            let EFIT: EFIT = parser.read()?;
                             println!("{:?}", EFIT);
                         },
                         b"CTDA" => {
-                            let CTDA: CTDA = parser.read_fast()?;
+                            let CTDA: CTDA = parser.read()?;
                             println!("{:?}", CTDA);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -965,7 +1015,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -977,7 +1027,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", ICON);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -997,7 +1047,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -1005,7 +1055,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1021,11 +1071,11 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1041,7 +1091,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1053,7 +1103,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                     indent!(parser, "{:?} ", header);
                     match &header.type_id.0 {
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1069,7 +1119,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1085,7 +1135,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1097,7 +1147,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                     indent!(parser, "{:?} ", header);
                     match &header.type_id.0 {
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1113,7 +1163,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1129,7 +1179,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1149,7 +1199,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1169,7 +1219,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1193,7 +1243,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", ICO2);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1213,7 +1263,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -1221,7 +1271,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1237,7 +1287,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1253,7 +1303,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1269,7 +1319,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1297,7 +1347,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", ICON);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1317,7 +1367,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1333,7 +1383,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -1341,7 +1391,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1357,7 +1407,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1377,11 +1427,11 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         b"CTDA" => {
-                            let CTDA: CTDA = parser.read_fast()?;
+                            let CTDA: CTDA = parser.read()?;
                             println!("{:?}", CTDA);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1397,7 +1447,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1417,7 +1467,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MODL);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1433,7 +1483,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1453,7 +1503,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", FULL);
                         },
                         b"OBND" => {
-                            let OBND: OBND = parser.read_fast()?;
+                            let OBND: OBND = parser.read()?;
                             println!("{:?}", OBND);
                         },
                         b"MODL" => {
@@ -1465,7 +1515,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MOD3);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1481,7 +1531,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1505,7 +1555,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", DESC);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
@@ -1521,20 +1571,283 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", EDID);
                         },
                         _ => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unknown field '{}'", header.type_id);
                         }
                     }
                     Ok(())
                 }, size)?;
             },
-            b"NPC_" => { self.skip(size)?; },
-            b"WRLD" => { self.skip(size)?; },
-            b"IMAD" => { self.skip(size)?; },
+            b"NPC_" => { self.skip(size as u64)?; },
+            b"WRLD" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!("{:?}", EDID);
+                        },
+                        b"FULL" => {
+                            let FULL = parser.read_lstring(header.size)?;
+                            println!("{:?}", FULL);
+                        },
+                        b"CNAM" => {
+                            let CNAM: formid_t = parser.read()?;
+                            println!("{:?}", CNAM);
+                        },
+                        b"XXXX" => {
+                            let XXXX_size: u32 = parser.read()?;
+                            println!();
+                            let next: FieldHeader = parser.read()?;
+                            indentln!(parser, "{:?}", next);
+                            parser.skip(XXXX_size as u64)?;
+                        },
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"TACT" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!("{:?}", EDID);
+                        },
+                        b"FULL" => {
+                            let FULL = parser.read_lstring(header.size)?;
+                            println!("{:?}", FULL);
+                        },
+                        b"OBND" => {
+                            let OBND: OBND = parser.read()?;
+                            println!("{:?}", OBND);
+                        },
+                        b"MODL" => {
+                            let MODL = parser.read_zstring(header.size)?;
+                            println!("{:?}", MODL);
+                        },
+                        b"VNAM" => {
+                            let VNAM: formid_t = parser.read()?;
+                            println!("{:?}", VNAM);
+                        },
+                        b"SCRI" => {
+                            let SCRI: formid_t = parser.read()?;
+                            println!("{:?}", SCRI);
+                        },
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"ARMO" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!("{:?}", EDID);
+                        },
+                        b"FULL" => {
+                            let FULL = parser.read_lstring(header.size)?;
+                            println!("{:?}", FULL);
+                        },
+                        b"OBND" => {
+                            let OBND: OBND = parser.read()?;
+                            println!("{:?}", OBND);
+                        },
+                        b"EITM" => {
+                            let EITM: formid_t = parser.read()?;
+                            println!("{:?}", EITM);
+                        },
+                        b"ICON" => {
+                            let ICON = parser.read_zstring(header.size)?;
+                            println!("{:?}", ICON);
+                        },
+                        b"MODL" => {
+                            let MODL = parser.read_zstring(header.size)?;
+                            println!("{:?}", MODL);
+                        },
+                        b"MODS" => {
+                            let MODS = parser.read_zstring(header.size)?;
+                            println!("{:?}", MODS);
+                        },
+                        b"MOD2" => {
+                            let MOD2 = parser.read_zstring(header.size)?;
+                            println!("{:?}", MOD2);
+                        },
+                        b"MOD3" => {
+                            let MOD3 = parser.read_zstring(header.size)?;
+                            println!("{:?}", MOD3);
+                        },
+                        b"MO2S" => {
+                            let MO2S = parser.read_zstring(header.size)?;
+                            println!("{:?}", MO2S);
+                        },
+                        b"MO3S" => {
+                            let MO3S = parser.read_zstring(header.size)?;
+                            println!("{:?}", MO3S);
+                        },
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"DOOR" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!("{:?}", EDID);
+                        },
+                        b"FULL" => {
+                            let FULL = parser.read_lstring(header.size)?;
+                            println!("{:?}", FULL);
+                        },
+                        b"OBND" => {
+                            let OBND: OBND = parser.read()?;
+                            println!("{:?}", OBND);
+                        },
+                        b"SCRI" => {
+                            let SCRI: formid_t = parser.read()?;
+                            println!("{:?}", SCRI);
+                        },
+                        b"MODL" => {
+                            let MODL = parser.read_zstring(header.size)?;
+                            println!("{:?}", MODL);
+                        },
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"SCOL" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!("{:?}", EDID);
+                        },
+                        b"OBND" => {
+                            let OBND: OBND = parser.read()?;
+                            println!("{:?}", OBND);
+                        },
+                        b"MODL" => {
+                            let MODL = parser.read_zstring(header.size)?;
+                            println!("{:?}", MODL);
+                        },
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"IDLM" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!("{:?}", EDID);
+                        },
+                        b"OBND" => {
+                            let OBND: OBND = parser.read()?;
+                            println!("{:?}", OBND);
+                        },
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"IMAD" => { self.skip(size as u64)?; },
+            b"GRUP" => {
+                self.parse_records(ESMParser::GRUP, header.size as u64)?;
+                return Ok(())
+            },
+            b"CELL" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!("{:?}", EDID);
+                        },
+                        b"FULL" => {
+                            let FULL = parser.read_lstring(header.size)?;
+                            println!("{:?}", FULL);
+                        },
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"ACRE" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!("{:?}", EDID);
+                        },
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"NAVM" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"ACHR" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
+            b"REFR" => { self.skip(size as u64)?; },
             _ => {
-                self.skip(size)?;
+                self.skip(size as u64)?;
                 println!("Unknown record '{}'", type_id);
-            }
+            },
         }
         Ok(())
     }
@@ -1554,7 +1867,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                     indent!(parser, "{:?} ", header);
                     match &header.type_id.0 {
                         b"HEDR" => {
-                            let HEDR: HEDR = parser.read_fast()?;
+                            let HEDR: HEDR = parser.read()?;
                             println!("{:?}", HEDR);
                         },
                         b"CNAM" => {
@@ -1566,11 +1879,11 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                             println!("{:?}", MAST);
                         },
                         b"DATA" => {
-                            let DATA: u64 = parser.read_fast()?;
+                            let DATA: u64 = parser.read()?;
                             println!("{:?}", DATA);
                         },
                         b"ONAM" => {
-                            parser.skip(header.size as u32)?;
+                            parser.skip(header.size as u64)?;
                             println!("Unimplemented");
                         },
                         _ => { println!("Unknown typeid '{}'", header.type_id) }
@@ -1593,7 +1906,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
         let loop_end = self.reader().stream_position()? + total_size as u64;
         self.push();
         match loop {
-            let header: FieldHeader = self.read_fast()?;
+            let header: FieldHeader = self.read()?;
             let start = self.reader().stream_position()?;
             let size = header.size as u64;
             f(self, &header)?; // the parser function is responsible for parsing the size
@@ -1611,7 +1924,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
         self.push();
         match loop {
             let start = self.reader().stream_position()?;
-            let mut header: RecordHeader = self.read_fast()?;
+            let mut header: RecordHeader = self.read()?;
             let mut size = header.size as u64;
             if header.type_id != b"GRUP" { size += 24; }
             else { header.size -= 24; }
@@ -1628,9 +1941,9 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
     pub fn parse_top_level(&mut self, f: RecordParser<Self>) -> Result<()> {
         let total_size = self.reader().seek(std::io::SeekFrom::End(0))?;
         self.reader().seek(std::io::SeekFrom::Start(0))?;
-        self.pop();
+//        self.pop();
         self.parse_records(f, total_size)?;
-        self.push();
+//        self.push();
         Ok(())
     }
 }
@@ -1651,7 +1964,7 @@ mod tests {
     #[test]
     fn zeta() -> chunk_parser::Result<()> {
         const DATA: &[u8] = include_bytes!("../data/Zeta.esm");
-        let mut esm = ESMParser::buf(DATA);
+        let mut esm = ESMParser::cursor(DATA);
         esm.parse_top_level(ESMParser::TES4)
     }
 }
