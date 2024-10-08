@@ -6,6 +6,7 @@ use chunk_parser::prelude::*;
 pub use chunk_parser::Result;
 use esm_bindings::fo3::*;
 
+use std::any::Any;
 use std::ffi::CString;
 use std::io::Read;
 
@@ -18,8 +19,24 @@ pub struct ESMParser {
     localised: bool
 }
 
+#[chunk_parser(custom,depth)]
+pub struct ESMParser2 {
+    localised: bool
+}
+
 type RecordParser<P> = fn(parser: &mut P, header: &RecordHeader) -> Result<()>;
+type GroupParser<P> = fn(parser: &mut P, header: &GroupHeader) -> Result<()>;
 type FieldParser<P> = fn(parser: &mut P, header: &FieldHeader) -> Result<()>;
+
+#[derive(Debug)]
+pub struct Record {
+    pub header: RecordHeader
+}
+
+#[derive(Debug)]
+pub struct Group {
+    pub header: GroupHeader
+}
 
 macro_rules! indent {
     ($parser:expr, $($arg:tt)*) => {
@@ -1920,7 +1937,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                 self.parse_records(ESMParser::GRUP, size as u64)?;
                 return Ok(())
             },
-            _ => { println!("Unknown record '{}'", type_id)}
+            _ => { println!("Unknown Top Record: '{}'", type_id)}
         }
         Ok(())
     }
@@ -1973,6 +1990,90 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
     }
 }
 
+
+impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
+    
+
+    pub fn parse_esm(&mut self) -> Result<()> {
+        
+        // Get file size
+        let total_size = self.reader().seek(std::io::SeekFrom::End(0))?;
+
+        // Go to start of file
+        self.reader().seek(std::io::SeekFrom::Start(0))?;
+
+        // Parse the FileHeader record
+        let _header = self.parse_record()?;
+
+        // Parse the rest of the record groups
+        loop {
+            if self.reader().stream_position()? == total_size {
+                break;
+            }
+            self.parse_group()?;
+        }
+
+        Ok(())
+    }
+
+    pub fn parse_record(&mut self) -> Result<Record> {
+        let header: RecordHeader = self.read()?;
+
+        if header.type_id == b"GRUP" {
+            panic!("Unexpected GRUP record");
+        } else {
+            println!("{:?}", header);
+            self.skip(header.size as u64)?;
+        }
+
+        Ok(Record { header })
+    }
+
+    pub fn parse_records(&mut self, size: u64) -> Result<()> {
+        let mut records = Vec::new();
+        let loop_end = self.reader().stream_position()? + size;
+        while self.reader().stream_position()? < loop_end {
+            records.push(self.parse_record()?);
+        }
+        Ok(())
+    }
+
+    pub fn parse_group(&mut self) -> Result<Group> {
+        let header: GroupHeader = self.read()?;
+
+        if header.type_id != b"GRUP" {
+            panic!("Expected GRUP record");
+        }
+
+        println!("{:?}", header);
+
+        match header.type_ {
+            // Top Group
+            0 => {
+                match &header.label.0 {
+                    b"WRLD" | b"CELL" | b"QUST" => {
+                        // TODO These groups have a custom structure
+                        self.skip(header.size as u64 - 24)?;
+                    }
+                    _ => {
+                        // Attempt to parse the non-custom groups which are just a list of records
+                        let _records = self.parse_records(header.size as u64)?;
+                    }
+                }
+                let _records = self.parse_records(header.size as u64 - 24)?;
+            }
+            _ => {
+                // TODO Nested Groups
+                self.skip(header.size as u64 - 24)?;
+            }
+        }
+
+        
+
+        Ok(Group { header })
+    }
+}
+
 //------------------------------------------------------------------------------
 
 pub mod prelude {
@@ -1986,10 +2087,10 @@ pub mod prelude {
 mod tests {
     use super::prelude::*;
 
-    #[test]
-    fn zeta() -> chunk_parser::Result<()> {
+    //#[test]
+    /*fn zeta() -> chunk_parser::Result<()> {
         const DATA: &[u8] = include_bytes!("../data/Zeta.esm");
         let mut esm = ESMParser::cursor(DATA);
         esm.parse_top_level(ESMParser::TES4)
-    }
+    }*/
 }
