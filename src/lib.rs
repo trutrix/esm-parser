@@ -69,47 +69,58 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
 
     pub fn GRUP(&mut self, header: &RecordHeader) -> Result<()> {
         let RecordHeader { size, type_id, flags, .. } = *header;
-        if type_id != b"REFR" {
-            indentln!(self, "{:?}", header);
-        }
 
-        if (flags & 0x00040000) != 0 {
-            let uncompressed_size: u32 = self.read()?;
-            let decompressed = &self.deflate(size as usize - 4)?;
-            let reader = std::io::Cursor::new(decompressed);
-            let mut parser = ESMParser::new(reader);
-            *parser.inner_depth() = self.depth();
-            parser.localised = self.localised;
-            parser.push();
-            // this block is for the first compressed record, NPC_
-            parser.parse_fields(|parser, header| {
-                indent!(parser, "{:?} ", header);
-                match &header.type_id.0 {
-                    b"EDID" => {
-                        let EDID = parser.read_zstring(header.size)?;
-                        println!("{:?}", EDID);
-                    },
-                    b"FULL" => {
-                        let FULL = parser.read_lstring(header.size)?;
-                        println!("{:?}", FULL);
-                    },
-                    b"OBND" => {
-                        let OBND: OBND = parser.read()?;
-                        println!("{:?}", OBND);
-                    },
-                    b"MODL" => {
-                        let MODL = parser.read_zstring(header.size)?;
-                        println!("{:?}", MODL);
-                    },
-                    _ => {
-                        parser.skip(header.size as u64)?;
-                        println!("Unknown field '{}'", header.type_id);
+//        if self.depth() >= 3 {
+//            self.skip(size as u64)?;
+//            return Ok(())
+//        }
+
+        if type_id == b"GRUP" {
+            let GRUP: GroupHeader = unsafe { std::mem::transmute(*header) };
+            indentln!(self, "{:?}", GRUP);
+        } else {
+            if type_id != b"REFR" {
+                indentln!(self, "{:?}", header);
+            }
+
+            if (flags & 0x00040000) != 0 {
+                let _uncompressed_size: u32 = self.read()?;
+                let decompressed = &self.deflate(size as usize - 4)?;
+                let reader = std::io::Cursor::new(decompressed);
+                let mut parser = ESMParser::new(reader);
+                *parser.inner_depth() = self.depth();
+                parser.localised = self.localised;
+                parser.push();
+                // this block is for the first compressed record, NPC_
+                parser.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        b"EDID" => {
+                            let EDID = parser.read_zstring(header.size)?;
+                            println!("{:?}", EDID);
+                        },
+                        b"FULL" => {
+                            let FULL = parser.read_lstring(header.size)?;
+                            println!("{:?}", FULL);
+                        },
+                        b"OBND" => {
+                            let OBND: OBND = parser.read()?;
+                            println!("{:?}", OBND);
+                        },
+                        b"MODL" => {
+                            let MODL = parser.read_zstring(header.size)?;
+                            println!("{:?}", MODL);
+                        },
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
                     }
-                }
-                Ok(())
-            }, decompressed.len() as u32)?;
-            parser.pop();
-            return Ok(())
+                    Ok(())
+                }, decompressed.len() as u32)?;
+                parser.pop();
+                return Ok(())
+            }
         }
 
         match &type_id.0 {
@@ -1843,6 +1854,18 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
                     Ok(())
                 }, size)?;
             },
+            b"INFO" => {
+                self.parse_fields(|parser, header| {
+                    indent!(parser, "{:?} ", header);
+                    match &header.type_id.0 {
+                        _ => {
+                            parser.skip(header.size as u64)?;
+                            println!("Unknown field '{}'", header.type_id);
+                        }
+                    }
+                    Ok(())
+                }, size)?;
+            },
             b"REFR" => { self.skip(size as u64)?; },
             _ => {
                 self.skip(size as u64)?;
@@ -1903,13 +1926,14 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
     }
 
     pub fn parse_fields(&mut self, f: FieldParser<Self>, total_size: u32) -> Result<()> {
+        if total_size == 0 { return Ok(()) }
         let loop_end = self.reader().stream_position()? + total_size as u64;
         self.push();
         match loop {
             let header: FieldHeader = self.read()?;
             let start = self.reader().stream_position()?;
             let size = header.size as u64;
-            f(self, &header)?; // the parser function is responsible for parsing the size
+            f(self, &header)?; // parse the contents
             let end = start + size;
             let pos = self.reader().stream_position()?;
             if pos == loop_end { break Ok(()) } // function consumed chunk
@@ -1920,6 +1944,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
     }
 
     fn parse_records(&mut self, f: RecordParser<Self>, total_size: u64) -> Result<()> {
+        if total_size == 0 { return Ok(()) }
         let loop_end = self.reader().stream_position()? + total_size as u64;
         self.push();
         match loop {
@@ -1928,7 +1953,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
             let mut size = header.size as u64;
             if header.type_id != b"GRUP" { size += 24; }
             else { header.size -= 24; }
-            f(self, &header)?; // the parser function is responsible for parsing the size
+            f(self, &header)?; // parse the contents
             let end = start + size;
             let pos = self.reader().stream_position()?;
             if pos == loop_end { break Ok(()) } // function consumed chunk
