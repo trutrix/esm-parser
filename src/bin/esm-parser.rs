@@ -11,8 +11,8 @@ fn main() -> esm_parser::Result<()> {
     }
 
     // parse file using guesser
-    let mut parser = ESMParser::file(&args[1])?;
-    parser.parse_top_level(ESMParser::TES4)
+    let mut parser = ESMParser2::file(&args[1])?;
+    parser.parse_top_level()
 }
 
 #[cfg(test)]

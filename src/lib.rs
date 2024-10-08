@@ -1994,8 +1994,8 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
 impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
     
 
-    pub fn parse_esm(&mut self) -> Result<()> {
-        
+    pub fn parse_top_level(&mut self) -> Result<()> {
+
         // Get file size
         let total_size = self.reader().seek(std::io::SeekFrom::End(0))?;
 
@@ -2003,11 +2003,11 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         self.reader().seek(std::io::SeekFrom::Start(0))?;
 
         // Parse the FileHeader record
-        let _header = self.parse_record()?;
+        let _header_record = self.parse_record()?;
 
         // Parse the rest of the record groups
         loop {
-            if self.reader().stream_position()? == total_size {
+            if self.reader().stream_position()? >= total_size {
                 break;
             }
             self.parse_group()?;
@@ -2020,12 +2020,23 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let header: RecordHeader = self.read()?;
 
         if header.type_id == b"GRUP" {
-            panic!("Unexpected GRUP record");
-        } else {
-            println!("{:?}", header);
-            self.skip(header.size as u64)?;
+            panic!("Unexpected GRUP record: {:?}", header);
         }
+        
+        // TODO handle decrompression
+        if header.flags & 0x40000000 != 0 {
+            self.skip(header.size as u64)?;
+        } else {
+            match header.type_id.0 {
 
+                _ => {
+                    self.skip(header.size as u64)?;
+                }
+            }
+    
+        }
+        
+        
         Ok(Record { header })
     }
 
@@ -2051,20 +2062,58 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
             // Top Group
             0 => {
                 match &header.label.0 {
-                    b"WRLD" | b"CELL" | b"QUST" => {
+                    b"WRLD" | b"CELL" | b"QUST" | b"DIAL" => {
                         // TODO These groups have a custom structure
                         self.skip(header.size as u64 - 24)?;
                     }
                     _ => {
                         // Attempt to parse the non-custom groups which are just a list of records
-                        let _records = self.parse_records(header.size as u64)?;
+                        let _records = self.parse_records(header.size as u64 - 24)?;
                     }
                 }
-                let _records = self.parse_records(header.size as u64 - 24)?;
+            }
+            // World Children
+            1 => {
+                self.skip(header.size as u64 - 24)?;
+            }
+            // Interior Cell Block
+            2 => {
+                self.skip(header.size as u64 - 24)?;
+            }
+            // Interior Cell Sub-Block
+            3 => {
+                self.skip(header.size as u64 - 24)?;
+            }
+            // Exterior Cell Block
+            4 => {
+                self.skip(header.size as u64 - 24)?;
+            }
+            // Exterior Cell Sub-block
+            5 => {
+                self.skip(header.size as u64 - 24)?;
+            }
+            // Cell Children
+            6 => {
+                self.skip(header.size as u64 - 24)?;
+            }
+            // Topic Children
+            7 => {
+                self.skip(header.size as u64 - 24)?;
+            }
+            // Cell Persistent Children
+            8 => {
+                self.skip(header.size as u64 - 24)?;
+            }
+            // Cell Temporary Children
+            9 => {
+                self.skip(header.size as u64 - 24)?;
+            }
+            // Cell Visible Distant Children
+            10 => {
+                self.skip(header.size as u64 - 24)?;
             }
             _ => {
-                // TODO Nested Groups
-                self.skip(header.size as u64 - 24)?;
+                panic!("Unknown group type: {:?}", header);
             }
         }
 
@@ -2072,13 +2121,31 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
 
         Ok(Group { header })
     }
+
+    pub fn parse_fields(&mut self, f: FieldParser<Self>, total_size: u32) -> Result<()> {
+        if total_size == 0 { return Ok(()) }
+        let loop_end = self.reader().stream_position()? + total_size as u64;
+        self.push();
+        match loop {
+            let header: FieldHeader = self.read()?;
+            let start = self.reader().stream_position()?;
+            let size = header.size as u64;
+            f(self, &header)?; // parse the contents
+            let end = start + size;
+            let pos = self.reader().stream_position()?;
+            if pos == loop_end { break Ok(()) } // function consumed chunk
+            else if pos != end { return Err(chunk_parser::Error::ParseError) } // function made a mistake
+        } {
+            res => { self.pop(); res }
+        }
+    }
 }
 
 //------------------------------------------------------------------------------
 
 pub mod prelude {
     pub use chunk_parser::prelude::*;
-    pub use super::ESMParser;
+    pub use {super::ESMParser, super::ESMParser2};
 }
 
 //==============================================================================
@@ -2087,10 +2154,11 @@ pub mod prelude {
 mod tests {
     use super::prelude::*;
 
-    //#[test]
-    /*fn zeta() -> chunk_parser::Result<()> {
+    #[test]
+    fn zeta() -> chunk_parser::Result<()> {
         const DATA: &[u8] = include_bytes!("../data/Zeta.esm");
-        let mut esm = ESMParser::cursor(DATA);
-        esm.parse_top_level(ESMParser::TES4)
-    }*/
+        let mut esm = ESMParser2::cursor(DATA);
+        esm.parse_top_level()
+    }
+
 }
