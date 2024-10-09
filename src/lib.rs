@@ -2018,7 +2018,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
 
     pub fn parse_record(&mut self) -> Result<Record> {
         let header: RecordHeader = self.read()?;
-
+        indentln!(self, "{:?}", header);
         if header.type_id == b"GRUP" {
             panic!("Unexpected GRUP record: {:?}", header);
         }
@@ -2051,30 +2051,71 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
 
     pub fn parse_group(&mut self) -> Result<Group> {
         let header: GroupHeader = self.read()?;
+        let loop_end = self.reader().stream_position()? + (header.size as u64 - 24);
+
 
         if header.type_id != b"GRUP" {
             panic!("Expected GRUP record");
         }
 
-        println!("{:?}", header);
+        
+
+        
 
         match header.type_ {
             // Top Group
             0 => {
                 match &header.label.0 {
-                    b"WRLD" | b"CELL" | b"QUST" | b"DIAL" => {
-                        // TODO These groups have a custom structure
+                    b"WRLD" => {
+                        indentln!(self, "{:?}", header);
+                        self.push();
+                        
+                        while self.reader().stream_position()? <= loop_end {
+                            let world = self.parse_record()?;
+                            indentln!(self, "{:?}", world);
+                            let world_children = self.parse_group()?;
+                            //indentln!(self, "{:?}", world_children);
+                        }
+                        self.pop();
+                        
+                    }
+                    b"CELL" => {
+                        self.push();
+                        while self.reader().stream_position()? < loop_end {
+                            let interior_cell_block = self.parse_group()?;
+                        }
+                        self.pop();
+                    }
+                    b"QUST" => {
+                        self.push();
+                        while self.reader().stream_position()? < loop_end {
+                            let quest = self.parse_record()?;
+                            // let children = self.parse_group()?;
+                        }
+                        self.pop();
+                    }
+                    b"DIAL" => {
+                        self.push();
                         self.skip(header.size as u64 - 24)?;
+                        // while self.reader().stream_position()? < loop_end {
+                        //     let dialog = self.parse_record()?;
+                        //     let children = self.parse_group()?;
+                        // }
+                        self.pop();
                     }
                     _ => {
+                        indentln!(self, "{:?}", header);
+                        self.push();
                         // Attempt to parse the non-custom groups which are just a list of records
                         let _records = self.parse_records(header.size as u64 - 24)?;
+                        self.pop();
                     }
                 }
             }
             // World Children
             1 => {
-                self.skip(header.size as u64 - 24)?;
+                indentln!(self, "World Children GRUP for Record Id {:?}", u32::from_le_bytes(header.label.0.as_slice().try_into().unwrap()));
+                self.skip(loop_end)?;
             }
             // Interior Cell Block
             2 => {
