@@ -156,8 +156,8 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
 name = "esm-bindings"
-version = "0.2.4"
-source = "git+https://github.com/trutrix/esm-bindings.git#88eb130d7e9638ac503715307e84196eadc5175d"
+version = "0.2.5"
+source = "git+https://github.com/trutrix/esm-bindings.git#27bce5220050f0ce9943a03280c1ed38bd6382a6"
 dependencies = [
  "bindgen",
  "fourcc",

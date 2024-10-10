@@ -2018,7 +2018,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
 
     pub fn parse_record(&mut self) -> Result<Record> {
         let header: RecordHeader = self.read()?;
-        indentln!(self, "{:?}", header);
+        //indentln!(self, "{:?}", header);
         if header.type_id == b"GRUP" {
             panic!("Unexpected GRUP record: {:?}", header);
         }
@@ -2051,11 +2051,12 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
 
     pub fn parse_group(&mut self) -> Result<Group> {
         let header: GroupHeader = self.read()?;
-        let loop_end = self.reader().stream_position()? + (header.size as u64 - 24);
+        let size = header.size as u64 - 24;
+        let loop_end = self.reader().stream_position()? + size;
 
 
         if header.type_id != b"GRUP" {
-            panic!("Expected GRUP record");
+            panic!("Expected GRUP record got: {:?} instead", header.type_id);
         }
 
         
@@ -2070,11 +2071,13 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                         indentln!(self, "{:?}", header);
                         self.push();
                         
-                        while self.reader().stream_position()? <= loop_end {
+                        while self.reader().stream_position()? < loop_end {
+                            self.push();
                             let world = self.parse_record()?;
                             indentln!(self, "{:?}", world);
                             let world_children = self.parse_group()?;
                             //indentln!(self, "{:?}", world_children);
+                            self.pop();
                         }
                         self.pop();
                         
@@ -2095,63 +2098,87 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                         self.pop();
                     }
                     b"DIAL" => {
+                        indentln!(self, "{:?}", header);
                         self.push();
-                        self.skip(header.size as u64 - 24)?;
-                        // while self.reader().stream_position()? < loop_end {
-                        //     let dialog = self.parse_record()?;
-                        //     let children = self.parse_group()?;
-                        // }
+                        //self.skip(header.size as u64 - 24)?;
+                        while self.reader().stream_position()? < loop_end {
+                            let dialog = self.parse_record()?;
+
+                            indentln!(self, "{:?}", dialog);
+
+                            let next_header: GroupHeader = self.read()?;
+                            self.reader.seek_relative(-24)?;
+
+                            if &next_header.type_id.0 == b"GRUP" && next_header.type_ == 7 {
+                                self.push();
+                                let children = self.parse_group()?;
+                                self.pop();
+                            }
+
+                        }
                         self.pop();
                     }
                     _ => {
                         indentln!(self, "{:?}", header);
                         self.push();
                         // Attempt to parse the non-custom groups which are just a list of records
-                        let _records = self.parse_records(header.size as u64 - 24)?;
+                        let _records = self.parse_records(size)?;
                         self.pop();
                     }
                 }
             }
             // World Children
             1 => {
-                indentln!(self, "World Children GRUP for Record Id {:?}", u32::from_le_bytes(header.label.0.as_slice().try_into().unwrap()));
-                self.skip(loop_end)?;
+                self.push();
+                indentln!(self, "World Children({:?})", u32::from_le_bytes(header.label.0.as_slice().try_into().unwrap()));
+                self.parse_cell()?;
+                self.push();
+                while self.reader.stream_position()? < loop_end {
+                    self.parse_group()?;
+                }
+                self.pop();
+                self.pop();
             }
             // Interior Cell Block
             2 => {
-                self.skip(header.size as u64 - 24)?;
+                self.skip(size)?;
             }
             // Interior Cell Sub-Block
             3 => {
-                self.skip(header.size as u64 - 24)?;
+
+                self.skip(size)?;
             }
             // Exterior Cell Block
             4 => {
-                self.skip(header.size as u64 - 24)?;
+                indentln!(self, "Exterior Cell Block({},{})", i16::from_le_bytes([header.label.0[0], header.label.0[1]]), i16::from_le_bytes([header.label.0[2], header.label.0[3]]));
+                self.skip(size)?;
             }
             // Exterior Cell Sub-block
             5 => {
-                self.skip(header.size as u64 - 24)?;
+                indentln!(self, "Exterior Cell Sub-Block({},{})", i16::from_le_bytes([header.label.0[0], header.label.0[1]]), i16::from_le_bytes([header.label.0[2], header.label.0[3]]));
+                self.skip(size)?;
             }
             // Cell Children
             6 => {
-                self.skip(header.size as u64 - 24)?;
+                indentln!(self, "Cell Children({:?})", u32::from_le_bytes(header.label.0.as_slice().try_into().unwrap()));
+                self.skip(size)?;
             }
             // Topic Children
             7 => {
-                self.skip(header.size as u64 - 24)?;
+                indentln!(self, "Topic Children({:?})", u32::from_le_bytes(header.label.0.as_slice().try_into().unwrap()));
+                self.skip(size)?;
             }
             // Cell Persistent Children
             8 => {
-                self.skip(header.size as u64 - 24)?;
+                self.skip(size)?;
             }
             // Cell Temporary Children
             9 => {
-                self.skip(header.size as u64 - 24)?;
+                self.skip(size)?;
             }
             // Cell Visible Distant Children
             10 => {
-                self.skip(header.size as u64 - 24)?;
+                self.skip(size)?;
             }
             _ => {
                 panic!("Unknown group type: {:?}", header);
@@ -2161,6 +2188,24 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         
 
         Ok(Group { header })
+    }
+
+    pub fn parse_cell(&mut self) -> Result<()> {
+        self.push();
+        let cell = self.parse_record()?;
+        indentln!(self, "{:?}", cell);
+        let header: GroupHeader = self.read()?;
+        self.reader.seek_relative(-24)?;
+
+        if header.type_id == b"GRUP" && header.type_ == 6 {
+            self.push();
+            self.parse_group()?;
+            self.pop();
+        }
+
+        self.pop();
+
+        Ok(())
     }
 
     pub fn parse_fields(&mut self, f: FieldParser<Self>, total_size: u32) -> Result<()> {
