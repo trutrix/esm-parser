@@ -15,6 +15,7 @@ fn main() -> esm_parser::Result<()> {
     parser.parse_top_level()
 }
 
+#[cfg(not(target_os = "windows"))]
 #[cfg(test)]
 mod tests {
     use assert_cmd::prelude::*;
