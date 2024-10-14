@@ -2053,7 +2053,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let header: GroupHeader = self.read()?;
         let size = header.size as u64 - 24;
         let loop_end = self.reader().stream_position()? + size;
-        let label = GroupLabel::from(header.label);
+        let label = header.try_get_label().expect("Could not get GroupHeader label.");
 
         if header.type_id != b"GRUP" {
             panic!("Expected GRUP record got: {:?} instead", header.type_id);
@@ -2109,7 +2109,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                             let next_header: GroupHeader = self.read()?;
                             self.reader.seek_relative(-24)?;
 
-                            if &next_header.type_id.0 == b"GRUP" && next_header.label.group_type == 7 {
+                            if &next_header.type_id.0 == b"GRUP" && next_header.group_type == 7 {
                                 self.push();
                                 let children = self.parse_group()?;
                                 self.pop();
@@ -2193,7 +2193,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let header: GroupHeader = self.read()?;
         self.reader.seek_relative(-24)?;
 
-        if header.type_id == b"GRUP" && header.label.group_type== GroupLabelType_CellChildren {
+        if header.type_id == b"GRUP" && header.group_type== GroupLabelType_CellChildren {
             self.push();
             self.parse_group()?;
             self.pop();
