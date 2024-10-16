@@ -2222,15 +2222,19 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
             GroupLabel::ExteriorCellBlock(coords) => {
                 indentln!(self, "Exterior Cell Block({:?})", coords);
                 self.push();
-                while self.reader.stream_position()? < loop_end {
-                    self.parse_group()?;
-                }
+                self.parse_until(loop_end, Self::parse_group)?;
                 self.pop();
             }
             // Exterior Cell Sub-block
             GroupLabel::ExteriorCellSubBlock(coords) => {
                 indentln!(self, "Exterior Cell Sub-Block({:?})", coords);
-                self.skip(size)?;
+                self.push();
+                let cell = self.parse_until(loop_end, Self::parse_cell)?;
+                self.pop();
+                // let next_id: GroupHeader = self.read()?;
+                // self.reader.seek_relative(-24)?;
+                // indentln!(self, "Next ID {:?}", next_id.try_get_label().unwrap());
+                //self.skip(size)?;
             }
             // Cell Children
             GroupLabel::CellChildren(record_id) => {
@@ -2330,6 +2334,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     let out  = CellChildren { parent_id, temporary, persistant };
                     //indentln!(self, "{:?}", out);
                     self.pop();
+                    self.pop();
                     Ok(out)
                 } else {
                     let next_label = next_header.try_get_label().expect(format!("Unknown group type encountered inside CellChildren: {:?}", header).as_str());
@@ -2349,6 +2354,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     let out = CellChildren { parent_id, temporary, persistant };
                     //indentln!(self, "{:?}", out);
                     self.pop();
+                    self.pop();
                     Ok(out)
                 }
 
@@ -2362,17 +2368,17 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
     }
 
     pub fn parse_world_entry(&mut self) -> Result<WorldEntry> {
+
         let world = self.parse_record()?;
         indentln!(self, "{:?}", world.header);
-        self.push();
 
         let world_children = self.parse_world_children()?;
 
-        self.pop();
         Ok(WorldEntry { world, world_children })
     }
 
     pub fn parse_world_children(&mut self) -> Result<WorldChildren> {
+        self.push();
         let header: GroupHeader = self.read()?;
         let limit = self.reader.stream_position()? + header.size as u64 - 24;
         let label = header.try_get_label().unwrap();
@@ -2386,7 +2392,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
             self.parse_group()?;
         }
 
-        
+        self.pop();
         Ok(WorldChildren { cell, blocks })
     }
 
@@ -2424,7 +2430,7 @@ mod tests {
 
     #[test]
     fn zeta() -> chunk_parser::Result<()> {
-        const DATA: &[u8] = include_bytes!("../data/Zeta.esm");
+        const DATA: &[u8] = include_bytes!("../data/Fallout4.esm");
         let mut esm = ESMParser2::cursor(DATA);
         esm.parse_top_level()
     }
