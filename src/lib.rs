@@ -2058,6 +2058,13 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
 
 impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
     
+    pub fn parse_until<F>(&mut self, limit: u64, f: fn (&mut Self) -> Result<F>) -> Result<Vec<F>> {
+        let mut out = Vec::new();
+        while self.reader.stream_position()? < limit {
+            out.push(f(self)?);
+        }
+        Ok(out)
+    }
 
     pub fn parse_top_level(&mut self) -> Result<()> {
 
@@ -2071,12 +2078,14 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let _header_record = self.parse_record()?;
 
         // Parse the rest of the record groups
-        loop {
-            if self.reader().stream_position()? >= total_size {
-                break;
-            }
-            self.parse_group()?;
-        }
+        // loop {
+        //     if self.reader().stream_position()? >= total_size {
+        //         break;
+        //     }
+        //     self.parse_group()?;
+        // }
+
+        self.parse_until(total_size, Self::parse_group)?;
 
         Ok(())
     }
@@ -2106,11 +2115,13 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
     }
 
     pub fn parse_records(&mut self, size: u64) -> Result<Vec<Record>> {
-        let mut records = Vec::new();
-        let loop_end = self.reader().stream_position()? + size;
-        while self.reader().stream_position()? < loop_end {
-            records.push(self.parse_record()?);
-        }
+        //let mut records = Vec::new();
+        // let loop_end = self.reader().stream_position()? + size;
+        // while self.reader().stream_position()? < loop_end {
+        //     records.push(self.parse_record()?);
+        // }
+        let limit = self.reader().stream_position()? + size;
+        let records = self.parse_until(limit, Self::parse_record)?;
         Ok(records)
     }
 
@@ -2135,18 +2146,17 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     b"WRLD" => {
                         indentln!(self, "{:?}", label);
                         self.push();
-                        
-                        while self.reader().stream_position()? < loop_end {
-                            self.parse_world_entry()?;
-                        }
+
+                        self.parse_until(loop_end, Self::parse_world_entry)?;
                         self.pop();
                         
                     }
                     b"CELL" => {
                         self.push();
-                        while self.reader().stream_position()? < loop_end {
-                            let interior_cell_block = self.parse_group()?;
-                        }
+                        // while self.reader().stream_position()? < loop_end {
+                        //     let interior_cell_block = self.parse_group()?;
+                        // }
+                        self.parse_until(loop_end, Self::parse_group)?;
                         self.pop();
                     }
                     b"QUST" => {
