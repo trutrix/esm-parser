@@ -2127,17 +2127,14 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
 
     pub fn parse_group(&mut self) -> Result<Group> {
         let header: GroupHeader = self.read()?;
-        let size = header.size as u64 - 24;
-        let loop_end = self.reader().stream_position()? + size;
+        let content_size = header.size as u64 - 24;
+        let content_end = self.reader().stream_position()? + content_size;
+
         let label = header.try_get_label().expect("Could not get GroupHeader label.");
 
         if header.type_id != b"GRUP" {
             panic!("Expected GRUP record got: {:?} instead", header.type_id);
         }
-
-        
-
-        
 
         match label {
             // Top Group
@@ -2147,7 +2144,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                         indentln!(self, "{:?}", label);
                         self.push();
 
-                        self.parse_until(loop_end, Self::parse_world_entry)?;
+                        self.parse_until(content_end, Self::parse_world_entry)?;
                         self.pop();
                         
                     }
@@ -2156,7 +2153,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                         // while self.reader().stream_position()? < loop_end {
                         //     let interior_cell_block = self.parse_group()?;
                         // }
-                        self.parse_until(loop_end, Self::parse_group)?;
+                        self.parse_until(content_end, Self::parse_group)?;
                         self.pop();
                     }
                     b"QUST" => {
@@ -2172,7 +2169,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                         indentln!(self, "{:?}", header);
                         self.push();
                         //self.skip(header.size as u64 - 24)?;
-                        while self.reader().stream_position()? < loop_end {
+                        while self.reader().stream_position()? < content_end {
                             let dialog = self.parse_record()?;
 
                             //indentln!(self, "{:?}", dialog);
@@ -2193,43 +2190,35 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                         indentln!(self, "{:?}", label);
                         self.push();
                         // Attempt to parse the non-custom groups which are just a list of records
-                        let _records = self.parse_records(size)?;
+                        let _records = self.parse_records(content_size)?;
                         self.pop();
                     }
                 }
             }
             // World Children
-            GroupLabel::WorldChildren(record_id) => {
-                /*self.push();
-                indentln!(self, "{:?}", label);
-                self.parse_cell()?;
-                self.push();
-                while self.reader.stream_position()? < loop_end {
-                    self.parse_group()?;
-                }
-                self.pop();
-                self.pop();*/
+            GroupLabel::WorldChildren(_) => {
+                panic!("WorldChildren is handled by another function, you should not see this.");
             }
             // Interior Cell Block
             GroupLabel::InteriorCellBlock(index) => {
-                self.skip(size)?;
+                self.skip(content_size)?;
             }
             // Interior Cell Sub-Block
             GroupLabel::InteriorCellSubBlock(index) => {
-                self.skip(size)?;
+                self.skip(content_size)?;
             }
             // Exterior Cell Block
             GroupLabel::ExteriorCellBlock(coords) => {
                 indentln!(self, "Exterior Cell Block({:?})", coords);
                 self.push();
-                self.parse_until(loop_end, Self::parse_group)?;
+                self.parse_until(content_end, Self::parse_group)?;
                 self.pop();
             }
             // Exterior Cell Sub-block
             GroupLabel::ExteriorCellSubBlock(coords) => {
                 indentln!(self, "Exterior Cell Sub-Block({:?})", coords);
                 self.push();
-                let cell = self.parse_until(loop_end, Self::parse_cell)?;
+                let cell = self.parse_until(content_end, Self::parse_cell)?;
                 self.pop();
                 // let next_id: GroupHeader = self.read()?;
                 // self.reader.seek_relative(-24)?;
@@ -2239,24 +2228,24 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
             // Cell Children
             GroupLabel::CellChildren(record_id) => {
                 indentln!(self, "Cell Children({:?})", record_id);
-                self.skip(size)?;
+                self.skip(content_size)?;
             }
             // Topic Children
             GroupLabel::TopicChildren(record_id) => {
                 //indentln!(self, "Topic Children({:?})", record_id);
-                self.skip(size)?;
+                self.skip(content_size)?;
             }
             // Cell Persistent Children
             GroupLabel::CellPersistentChildren(record_id) => {
-                self.skip(size)?;
+                self.skip(content_size)?;
             }
             // Cell Temporary Children
             GroupLabel::CellTemporaryChildren(record_id) => {
-                self.skip(size)?;
+                self.skip(content_size)?;
             }
             // Cell Visible Distant Children
             GroupLabel::CellVisibleDistantChildren(record_id) => {
-                self.skip(size)?;
+                self.skip(content_size)?;
             }
         }
 
@@ -2271,7 +2260,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         indentln!(self, "{:?}", cell.header);
 
         let next_header: GroupHeader = self.read()?;
-        self.reader.seek_relative(-24)?;
+        self.rewind(24)?;
 
         if next_header.type_id == b"GRUP" {
             if let Ok(label) = next_header.try_get_label() {
@@ -2388,9 +2377,10 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let cell = self.parse_cell()?;
         let mut blocks = Vec::new();
         self.pop();
-        while self.reader.stream_position()? < limit {
-            self.parse_group()?;
-        }
+        // while self.reader.stream_position()? < limit {
+        //     self.parse_group()?;
+        // }
+        self.parse_until(limit, Self::parse_group)?;
 
         self.pop();
         Ok(WorldChildren { cell, blocks })
