@@ -2114,12 +2114,8 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         Ok(Record { header, fields: Vec::new() })
     }
 
+    #[deprecated]
     pub fn parse_records(&mut self, size: u64) -> Result<Vec<Record>> {
-        //let mut records = Vec::new();
-        // let loop_end = self.reader().stream_position()? + size;
-        // while self.reader().stream_position()? < loop_end {
-        //     records.push(self.parse_record()?);
-        // }
         let limit = self.reader().stream_position()? + size;
         let records = self.parse_until(limit, Self::parse_record)?;
         Ok(records)
@@ -2130,7 +2126,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let content_size = header.size as u64 - 24;
         let content_end = self.reader().stream_position()? + content_size;
 
-        let label = header.try_get_label().expect("Could not get GroupHeader label.");
+        let label = header.get_label();
 
         if header.type_id != b"GRUP" {
             panic!("Expected GRUP record got: {:?} instead", header.type_id);
@@ -2190,7 +2186,8 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                         indentln!(self, "{:?}", label);
                         self.push();
                         // Attempt to parse the non-custom groups which are just a list of records
-                        let _records = self.parse_records(content_size)?;
+                        //let _records = self.parse_records(content_size)?;
+                        let _records = self.parse_until(content_end, Self::parse_record)?;
                         self.pop();
                     }
                 }
@@ -2247,6 +2244,9 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
             GroupLabel::CellVisibleDistantChildren(record_id) => {
                 self.skip(content_size)?;
             }
+            GroupLabel::Unknown(type_id) => {
+                self.skip(content_size)?;
+            }
         }
 
         
@@ -2263,22 +2263,17 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         self.rewind(24)?;
 
         if next_header.type_id == b"GRUP" {
-            if let Ok(label) = next_header.try_get_label() {
-                match label {
-                    GroupLabel::CellChildren(_) => {
-                        if let Ok(cc) = self.parse_cell_children() {
-                            cell_children = Some(cc);
-                        } else {
-                            panic!("Could not parse CellChildren");
-                        }
-                    }
-                    _ => {
-                        // Ignore next group
+            match next_header.get_label() {
+                GroupLabel::CellChildren(_parent_id) => {
+                    if let Ok(cc) = self.parse_cell_children() {
+                        cell_children = Some(cc);
+                    } else {
+                        panic!("Could not parse CellChildren");
                     }
                 }
-                
-            } else {
-                panic!("Unknown group type encountered: {:?}", next_header);
+                _ => {
+                    panic!("Expected CellChildren group, got {:?}", next_header.get_label());
+                }
             }
         }
 
@@ -2289,7 +2284,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         self.push();
         let header: GroupHeader = self.read()?;
         let limit = self.reader.stream_position()? + header.size as u64 - 24;
-        let label = header.try_get_label().expect(format!("Unknown group type encountered: {:?}", header).as_str());
+        let label = header.get_label();
         
         
 
@@ -2300,7 +2295,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                 let mut persistant = None;
 
                 let next_header: GroupHeader = self.read()?;
-                let next_label = next_header.try_get_label().expect(format!("Unknown group type encountered inside CellChildren: {:?}", header).as_str());
+                let next_label = next_header.get_label();
 
                 self.push();
 
@@ -2326,7 +2321,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     self.pop();
                     Ok(out)
                 } else {
-                    let next_label = next_header.try_get_label().expect(format!("Unknown group type encountered inside CellChildren: {:?}", header).as_str());
+                    let next_label = next_header.get_label();
 
                     
 
@@ -2370,17 +2365,17 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         self.push();
         let header: GroupHeader = self.read()?;
         let limit = self.reader.stream_position()? + header.size as u64 - 24;
-        let label = header.try_get_label().unwrap();
+        let label = header.get_label();
         
         indentln!(self, "{:?}", label);
         self.push();
         let cell = self.parse_cell()?;
-        let mut blocks = Vec::new();
+
+        // TODO Push correct values to vector
+        let blocks = Vec::new();
+
         self.pop();
-        // while self.reader.stream_position()? < limit {
-        //     self.parse_group()?;
-        // }
-        self.parse_until(limit, Self::parse_group)?;
+        let _blocks = self.parse_until(limit, Self::parse_group)?;
 
         self.pop();
         Ok(WorldChildren { cell, blocks })
