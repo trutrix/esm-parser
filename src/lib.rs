@@ -100,6 +100,22 @@ pub struct CellTemporaryChildren {
 
 //------------------------------------------------------------------------------
 
+#[derive(Debug)]
+pub struct Dialog {
+    pub dialog: Record,
+    pub children: Option<Group>
+}
+
+//------------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub struct Quest {
+    pub quest: Record,
+    pub children: Option<Group>
+}
+
+//------------------------------------------------------------------------------
+
 macro_rules! indent {
     ($parser:expr, $($arg:tt)*) => {
         let indent = " ".repeat($parser.depth() as usize * 2);
@@ -2397,6 +2413,14 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         } {
             res => { self.pop(); res }
         }
+    }
+
+    pub fn parse_dial(&mut self) -> Result<Dialog> {
+        todo!()
+    }
+
+    pub fn parse_qust(&mut self) -> Result<Quest> {
+        todo!()
     }
 }
 
