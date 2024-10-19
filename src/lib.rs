@@ -6,7 +6,6 @@ use chunk_parser::prelude::*;
 pub use chunk_parser::Result;
 use esm_bindings::fo3::*;
 
-use std::any::Any;
 use std::ffi::CString;
 use std::io::Read;
 
@@ -27,7 +26,6 @@ pub struct ESMParser2 {
 //------------------------------------------------------------------------------
 
 type RecordParser<P> = fn(parser: &mut P, header: &RecordHeader) -> Result<()>;
-type GroupParser<P> = fn(parser: &mut P, header: &GroupHeader) -> Result<()>;
 type FieldParser<P> = fn(parser: &mut P, header: &FieldHeader) -> Result<()>;
 
 //------------------------------------------------------------------------------
@@ -83,8 +81,8 @@ pub struct Cell {
 #[derive(Debug)]
 pub struct CellChildren {
     pub parent_id: u32,
-    pub temporary: Option<CellTemporaryChildren>,
-    pub persistant: Option<CellPersistentChildren>
+    pub temporary: Option<Vec<Record>>,
+    pub persistant: Option<Vec<Record>>
 }
 
 #[derive(Debug)]
@@ -2094,13 +2092,6 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let _header_record = self.parse_record()?;
 
         // Parse the rest of the record groups
-        // loop {
-        //     if self.reader().stream_position()? >= total_size {
-        //         break;
-        //     }
-        //     self.parse_group()?;
-        // }
-
         self.parse_until(total_size, Self::parse_group)?;
 
         Ok(())
@@ -2108,7 +2099,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
 
     pub fn parse_record(&mut self) -> Result<Record> {
         let header: RecordHeader = self.read()?;
-        //indentln!(self, "{:?}", header);
+        indentln!(self, "{:?}", header);
         if header.type_id == b"GRUP" {
             panic!("Unexpected GRUP record: {:?}", header);
         }
@@ -2182,16 +2173,16 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                         self.push();
                         //self.skip(header.size as u64 - 24)?;
                         while self.reader().stream_position()? < content_end {
-                            let dialog = self.parse_record()?;
+                            let _dialog = self.parse_record()?;
 
                             //indentln!(self, "{:?}", dialog);
 
                             let next_header: GroupHeader = self.read()?;
                             self.reader.seek_relative(-24)?;
 
-                            if &next_header.type_id.0 == b"GRUP" && next_header.group_type == 7 {
+                            if &next_header.type_id.0 == b"GRUP" && next_header.group_type == GroupLabelType_TopicChildren {
                                 self.push();
-                                let children = self.parse_group()?;
+                                let _children = self.parse_group()?;
                                 self.pop();
                             }
 
@@ -2213,11 +2204,11 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                 panic!("WorldChildren is handled by another function, you should not see this.");
             }
             // Interior Cell Block
-            GroupLabel::InteriorCellBlock(index) => {
+            GroupLabel::InteriorCellBlock(_index) => {
                 self.skip(content_size)?;
             }
             // Interior Cell Sub-Block
-            GroupLabel::InteriorCellSubBlock(index) => {
+            GroupLabel::InteriorCellSubBlock(_index) => {
                 self.skip(content_size)?;
             }
             // Exterior Cell Block
@@ -2231,7 +2222,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
             GroupLabel::ExteriorCellSubBlock(coords) => {
                 indentln!(self, "Exterior Cell Sub-Block({:?})", coords);
                 self.push();
-                let cell = self.parse_until(content_end, Self::parse_cell)?;
+                let _cell = self.parse_until(content_end, Self::parse_cell)?;
                 self.pop();
                 // let next_id: GroupHeader = self.read()?;
                 // self.reader.seek_relative(-24)?;
@@ -2244,23 +2235,23 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                 self.skip(content_size)?;
             }
             // Topic Children
-            GroupLabel::TopicChildren(record_id) => {
+            GroupLabel::TopicChildren(_record_id) => {
                 //indentln!(self, "Topic Children({:?})", record_id);
                 self.skip(content_size)?;
             }
             // Cell Persistent Children
-            GroupLabel::CellPersistentChildren(record_id) => {
+            GroupLabel::CellPersistentChildren(_record_id) => {
                 self.skip(content_size)?;
             }
             // Cell Temporary Children
-            GroupLabel::CellTemporaryChildren(record_id) => {
+            GroupLabel::CellTemporaryChildren(_record_id) => {
                 self.skip(content_size)?;
             }
             // Cell Visible Distant Children
-            GroupLabel::CellVisibleDistantChildren(record_id) => {
+            GroupLabel::CellVisibleDistantChildren(_record_id) => {
                 self.skip(content_size)?;
             }
-            GroupLabel::Unknown(type_id) => {
+            GroupLabel::Unknown(_type_id) => {
                 self.skip(content_size)?;
             }
         }
@@ -2278,18 +2269,11 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let next_header: GroupHeader = self.read()?;
         self.rewind(24)?;
 
-        if next_header.type_id == b"GRUP" {
-            match next_header.get_label() {
-                GroupLabel::CellChildren(_parent_id) => {
-                    if let Ok(cc) = self.parse_cell_children() {
-                        cell_children = Some(cc);
-                    } else {
-                        panic!("Could not parse CellChildren");
-                    }
-                }
-                _ => {
-                    panic!("Expected CellChildren group, got {:?}", next_header.get_label());
-                }
+        if next_header.type_id == b"GRUP" && next_header.group_type == GroupLabelType_CellChildren {
+            if let Ok(cc) = self.parse_cell_children() {
+                cell_children = Some(cc);
+            } else {
+                panic!("Could not parse CellChildren");
             }
         }
 
@@ -2299,7 +2283,6 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
     pub fn parse_cell_children(&mut self) -> Result<CellChildren> {
         self.push();
         let header: GroupHeader = self.read()?;
-        let limit = self.reader.stream_position()? + header.size as u64 - 24;
         let label = header.get_label();
         
         
@@ -2312,45 +2295,61 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
 
                 let next_header: GroupHeader = self.read()?;
                 let next_label = next_header.get_label();
+                let next_limit = self.reader.stream_position()? + next_header.size as u64 - 24;
 
                 self.push();
 
                 indentln!(self, "{:?}", next_label);
 
-                if next_label == GroupLabel::CellTemporaryChildren(parent_id) {
-                    //indentln!(self, "{:?}", next_label);
-                    self.skip(next_header.size as u64 - 24)?;
-                } else if next_label == GroupLabel::CellPersistentChildren(parent_id) {
-                    //indentln!(self, "{:?}", next_label);
-                    self.skip(next_header.size as u64 - 24)?;
-                } else {
-                    panic!("Unexpected group type encountered inside CellChildren: {:?}", header);
+                match next_label {
+                    GroupLabel::CellPersistentChildren(_parent) => {
+                        persistant = Some(self.parse_until(next_limit, Self::parse_record)?);
+                    }
+                    GroupLabel::CellTemporaryChildren(_parent) => {
+                        temporary = Some(self.parse_until(next_limit, Self::parse_record)?);
+                    }
+                    _ => {
+                        // If CellChildren exists, there should be at least one sub group
+                        // Panic if the sub group is not correct
+                        panic!("Unexpected group type encountered inside CellChildren: {:?}", header);
+                    }
                 }
+
 
                 let next_header: GroupHeader = self.read()?;
 
+                // Rewind if next group is not actually a group
                 if &next_header.type_id.0 != b"GRUP" {
-                    self.reader.seek_relative(-24)?;
+                    self.rewind(24)?;
+                    
                     let out  = CellChildren { parent_id, temporary, persistant };
                     //indentln!(self, "{:?}", out);
                     self.pop();
                     self.pop();
                     Ok(out)
+
+                
                 } else {
                     let next_label = next_header.get_label();
+                    let next_limit = self.reader().stream_position()? + next_header.size as u64 - 24;
 
-                    
-
-                    if next_label == GroupLabel::CellTemporaryChildren(parent_id) {
-                        indentln!(self, "{:?}", next_label);
-                        self.skip(next_header.size as u64 - 24)?;
-                    } else if next_label == GroupLabel::CellPersistentChildren(parent_id) {
-                        indentln!(self, "{:?}", next_label);
-                        self.skip(next_header.size as u64 - 24)?;
-                    } else {
-                        self.reader.seek_relative(-24)?;
-                        //panic!("Unexpected group type inner encountered inside CellChildren: {:?}", header);
+                    match next_label {
+                        GroupLabel::CellTemporaryChildren(_parent_id) => {
+                            indentln!(self, "{:?}", next_label);
+                            //self.skip(next_header.size as u64 - 24)?;
+                            temporary = Some(self.parse_until(next_limit, Self::parse_record)?);
+                        }
+                        GroupLabel::CellPersistentChildren(_parent_id) => {
+                            indentln!(self, "{:?}", next_label);
+                            //self.skip(next_header.size as u64 - 24)?;
+                            persistant = Some(self.parse_until(next_limit, Self::parse_record)?);
+                        }
+                        _ => {
+                            // Next group does not belong to cell children, rewind and continue
+                            self.rewind(24)?;
+                        }
                     }
+
                     let out = CellChildren { parent_id, temporary, persistant };
                     //indentln!(self, "{:?}", out);
                     self.pop();
@@ -2439,7 +2438,7 @@ mod tests {
 
     #[test]
     fn zeta() -> chunk_parser::Result<()> {
-        const DATA: &[u8] = include_bytes!("../data/Fallout4.esm");
+        const DATA: &[u8] = include_bytes!("../data/Zeta.esm");
         let mut esm = ESMParser2::cursor(DATA);
         esm.parse_top_level()
     }
