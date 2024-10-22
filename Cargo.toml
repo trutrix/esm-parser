@@ -8,7 +8,7 @@ description = "ESM file parser"
 [dependencies]
 flate2 = "1.0.34"
 chunk-parser = { git = "https://github.com/StealthOfKing/rust-chunk-parser.git" }
-esm-bindings = { git = "https://github.com/trutrix/esm-bindings.git" }
+esm-bindings = { path = "../esm-bindings" }
 
 [dev-dependencies]
 assert_cmd = "2.0"

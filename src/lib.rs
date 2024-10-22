@@ -11,9 +11,11 @@ use std::io::Read;
 
 use flate2::read::ZlibDecoder;
 
+
 //------------------------------------------------------------------------------
 
 #[chunk_parser(custom,depth)]
+#[deprecated]
 pub struct ESMParser {
     localised: bool
 }
@@ -127,6 +129,7 @@ macro_rules! indentln {
     };
 }
 
+/*
 /// Elder Scrolls Master parser implementation.
 impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
     /// Read a fixed sized string.
@@ -2065,7 +2068,7 @@ impl<R> ESMParser<R> where R: std::io::Read + std::io::Seek {
         Ok(())
     }
 }
-
+ */
 
 //------------------------------------------------------------------------------
 
@@ -2102,6 +2105,30 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         indentln!(self, "{:?}", header);
         if header.type_id == b"GRUP" {
             panic!("Unexpected GRUP record: {:?}", header);
+        }
+        
+        // TODO handle decrompression
+        if header.flags & 0x40000000 != 0 {
+            self.skip(header.size as u64)?;
+        } else {
+            match header.type_id.0 {
+
+                _ => {
+                    self.skip(header.size as u64)?;
+                }
+            }
+    
+        }
+        
+        
+        Ok(Record { header, fields: Vec::new() })
+    }
+
+    pub fn parse_refr(&mut self) -> Result<Record> {
+        let header: RecordHeader = self.read()?;
+        indentln!(self, "{:?}", header);
+        if header.type_id != b"REFR" {
+            panic!("Expected REFR record: {:?}", header);
         }
         
         // TODO handle decrompression
@@ -2303,10 +2330,10 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
 
                 match next_label {
                     GroupLabel::CellPersistentChildren(_parent) => {
-                        persistant = Some(self.parse_until(next_limit, Self::parse_record)?);
+                        persistant = Some(self.parse_until(next_limit, Self::parse_refr)?);
                     }
                     GroupLabel::CellTemporaryChildren(_parent) => {
-                        temporary = Some(self.parse_until(next_limit, Self::parse_record)?);
+                        temporary = Some(self.parse_until(next_limit, Self::parse_refr)?);
                     }
                     _ => {
                         // If CellChildren exists, there should be at least one sub group
@@ -2337,12 +2364,12 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                         GroupLabel::CellTemporaryChildren(_parent_id) => {
                             indentln!(self, "{:?}", next_label);
                             //self.skip(next_header.size as u64 - 24)?;
-                            temporary = Some(self.parse_until(next_limit, Self::parse_record)?);
+                            temporary = Some(self.parse_until(next_limit, Self::parse_refr)?);
                         }
                         GroupLabel::CellPersistentChildren(_parent_id) => {
                             indentln!(self, "{:?}", next_label);
                             //self.skip(next_header.size as u64 - 24)?;
-                            persistant = Some(self.parse_until(next_limit, Self::parse_record)?);
+                            persistant = Some(self.parse_until(next_limit, Self::parse_refr)?);
                         }
                         _ => {
                             // Next group does not belong to cell children, rewind and continue
