@@ -11,6 +11,9 @@ use std::io::Read;
 
 use flate2::read::ZlibDecoder;
 
+mod enums;
+pub use enums::*;
+
 
 //------------------------------------------------------------------------------
 
@@ -2095,7 +2098,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let _header_record = self.parse_record()?;
 
         // Parse the rest of the record groups
-        self.parse_until(total_size, Self::parse_group)?;
+        self.parse_until(total_size, Self::parse_top_group)?;
 
         Ok(())
     }
@@ -2124,35 +2127,33 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         Ok(Record { header, fields: Vec::new() })
     }
 
-    pub fn parse_refr(&mut self) -> Result<Record> {
+    pub fn parse_subgroup_record(&mut self) -> Result<Record> {
         let header: RecordHeader = self.read()?;
         indentln!(self, "{:?}", header);
-        if header.type_id != b"REFR" {
-            panic!("Expected REFR record: {:?}", header);
-        }
-        
-        // TODO handle decrompression
-        if header.flags & 0x40000000 != 0 {
-            self.skip(header.size as u64)?;
-        } else {
-            match header.type_id.0 {
-
-                _ => {
+        match &header.type_id.0 {
+            b"REFR" | b"ACHR" | b"PHZD" | b"LAND" | b"NAVM" | b"PGRE" | b"PMIS" => {
+                // TODO handle decrompression
+                if header.flags & 0x40000000 != 0 {
                     self.skip(header.size as u64)?;
+                } else {
+                    match header.type_id.0 {
+
+                        _ => {
+                            self.skip(header.size as u64)?;
+                        }
+                    }
+            
                 }
+                
+                
+                Ok(Record { header, fields: Vec::new() })
             }
-    
+            _ => {
+                panic!("Unexpected record type: {:?}", header);
+            }
         }
         
         
-        Ok(Record { header, fields: Vec::new() })
-    }
-
-    #[deprecated]
-    pub fn parse_records(&mut self, size: u64) -> Result<Vec<Record>> {
-        let limit = self.reader().stream_position()? + size;
-        let records = self.parse_until(limit, Self::parse_record)?;
-        Ok(records)
     }
 
     pub fn parse_group(&mut self) -> Result<Group> {
@@ -2173,26 +2174,18 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     b"WRLD" => {
                         indentln!(self, "{:?}", label);
                         self.push();
-
                         self.parse_until(content_end, Self::parse_world_entry)?;
                         self.pop();
                         
                     }
                     b"CELL" => {
                         self.push();
-                        // while self.reader().stream_position()? < loop_end {
-                        //     let interior_cell_block = self.parse_group()?;
-                        // }
                         self.parse_until(content_end, Self::parse_group)?;
                         self.pop();
                     }
                     b"QUST" => {
                         self.push();
                         self.skip(header.size as u64 - 24)?;
-                        // while self.reader().stream_position()? < loop_end {
-                        //     let quest = self.parse_record()?;
-                        //     // let children = self.parse_group()?;
-                        // }
                         self.pop();
                     }
                     b"DIAL" => {
@@ -2288,6 +2281,42 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         Ok(Group { header })
     }
 
+    pub fn parse_top_group(&mut self) -> Result<TopGroup> {
+        let header: GroupHeader = self.read()?;
+        let limit = self.reader.stream_position()? + header.size as u64 - 24;
+
+        println!("--------------------------------------------------");
+        self.push();
+
+        match header.get_label() {
+            GroupLabel::Top(id) => {
+                match &id.0 {
+                    b"GMST" => {
+                        let records = self.parse_until(limit, Self::parse_record)?;
+                        self.pop();
+                        return Ok(TopGroup::GameSetting);
+                    }
+
+                    b"WRLD" => {
+                        let records = self.parse_until(limit, Self::parse_world_entry)?;
+                        self.pop();
+                        return Ok(TopGroup::Worldspace);
+                    }
+
+                    _ => {
+                        self.seek(limit)?;
+                        indentln!(self, "{:?}", header.get_label());
+                        indentln!(self, "  Skipped");
+                        self.pop();
+                        Ok(TopGroup::Unknown)
+                    }
+                    
+                }
+            },
+            _ => panic!("Expected top group, got: {:?}", header)
+        }
+    }
+
     pub fn parse_cell(&mut self) -> Result<Cell> {
         let cell = self.parse_record()?;
         let mut cell_children = None;
@@ -2330,10 +2359,10 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
 
                 match next_label {
                     GroupLabel::CellPersistentChildren(_parent) => {
-                        persistant = Some(self.parse_until(next_limit, Self::parse_refr)?);
+                        persistant = Some(self.parse_until(next_limit, Self::parse_subgroup_record)?);
                     }
                     GroupLabel::CellTemporaryChildren(_parent) => {
-                        temporary = Some(self.parse_until(next_limit, Self::parse_refr)?);
+                        temporary = Some(self.parse_until(next_limit, Self::parse_subgroup_record)?);
                     }
                     _ => {
                         // If CellChildren exists, there should be at least one sub group
@@ -2364,12 +2393,12 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                         GroupLabel::CellTemporaryChildren(_parent_id) => {
                             indentln!(self, "{:?}", next_label);
                             //self.skip(next_header.size as u64 - 24)?;
-                            temporary = Some(self.parse_until(next_limit, Self::parse_refr)?);
+                            temporary = Some(self.parse_until(next_limit, Self::parse_subgroup_record)?);
                         }
                         GroupLabel::CellPersistentChildren(_parent_id) => {
                             indentln!(self, "{:?}", next_label);
                             //self.skip(next_header.size as u64 - 24)?;
-                            persistant = Some(self.parse_until(next_limit, Self::parse_refr)?);
+                            persistant = Some(self.parse_until(next_limit, Self::parse_subgroup_record)?);
                         }
                         _ => {
                             // Next group does not belong to cell children, rewind and continue
@@ -2470,4 +2499,10 @@ mod tests {
         esm.parse_top_level()
     }
 
+    #[test]
+    fn fallout4() -> chunk_parser::Result<()> {
+        const DATA: &[u8] = include_bytes!("../data/Fallout4.esm");
+        let mut esm = ESMParser2::cursor(DATA);
+        esm.parse_top_level()
+    }
 }
