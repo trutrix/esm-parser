@@ -2285,36 +2285,156 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let header: GroupHeader = self.read()?;
         let limit = self.reader.stream_position()? + header.size as u64 - 24;
 
-        println!("--------------------------------------------------");
+        println!("{:?} --------------------------------------------------", header.get_label());
+        
         self.push();
+
+        let records;
 
         match header.get_label() {
             GroupLabel::Top(id) => {
                 match &id.0 {
-                    b"GMST" => {
-                        let records = self.parse_until(limit, Self::parse_record)?;
-                        self.pop();
-                        return Ok(TopGroup::GameSetting);
-                    }
-
-                    b"WRLD" => {
-                        let records = self.parse_until(limit, Self::parse_world_entry)?;
-                        self.pop();
-                        return Ok(TopGroup::Worldspace);
-                    }
+                    
+                    b"AACT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ACTI" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ADDN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"AECH" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ALCH" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"AMDL" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"AMMO" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ANIO" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"AORU" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ARMA" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ARMO" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ARTO" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ASPC" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ASTP" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"AVIF" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"BNDS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"BOOK" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"BPTD" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"CAMS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    //b"CELL" => { records = TopGroup::Cell(self.parse_until(limit, Self::parse_cell)?); }
+                    b"CLAS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"CLFM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"CLMT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"CMPO" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"COBJ" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"COLL" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"CONT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"CPTH" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"CSTY" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"DEBR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"DFOB" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"DLVW" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"DMGT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"DOBJ" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"DOOR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ECZN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"EFSH" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ENCH" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"EQUP" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"EXPL" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"FACT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"FLOR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"FLST" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"FSTP" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"FSTS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"FURN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"GDRY" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"GLOB" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"GMST" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"GRAS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"HAZD" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"HDPT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"IDLE" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"IDLM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"IMAD" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"IMGS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"INGR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"INNR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"IPCT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"IPDS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"KEYM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"KSSM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"KYWD" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LAYR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LCRT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LCTN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LENS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LGTM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LIGH" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LSCR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LTEX" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LVLI" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LVLN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MATO" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MATT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MESG" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MGEF" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MISC" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MOVT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MSTT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MSWP" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MUSC" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MUST" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"NAVI" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"NOCM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"NOTE" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"NPC_" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"OMOD" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"OTFT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"OVIS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"PACK" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"PERK" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"PKIN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"PROJ" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    //b"QUST" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"RACE" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"REGN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"RELA" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"REVB" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"RFCT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"RFGP" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SCCO" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SCOL" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SCSN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SMBN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SMEN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SMQN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SNCT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SNDR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SOPM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SOUN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SPEL" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SPGD" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"STAG" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"STAT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"TACT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"TERM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"TREE" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"TRNS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"TXST" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"VTYP" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"WATR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"WEAP" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"WRLD" => { records = TopGroup::Worldspace(self.parse_until(limit, Self::parse_world_entry)?); }
+                    b"WTHR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"ZOOM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
 
                     _ => {
                         self.seek(limit)?;
-                        indentln!(self, "{:?}", header.get_label());
-                        indentln!(self, "  Skipped");
-                        self.pop();
-                        Ok(TopGroup::Unknown)
+                        indentln!(self, "Skipped");
+                        records = TopGroup::Skipped;
                     }
                     
                 }
             },
             _ => panic!("Expected top group, got: {:?}", header)
         }
+
+        self.pop();
+        Ok(records)
     }
 
     pub fn parse_cell(&mut self) -> Result<Cell> {

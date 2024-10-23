@@ -1,12 +1,14 @@
 
-use super::Record;
+use crate::*;
+
 
 pub enum TopGroup {
-    Unknown,
-    GameSetting,
-    Keyword,
-    Worldspace,
-    Cell,
+    Skipped,
+    Unhandled(Vec<Record>),
+    GameSetting(Vec<Record>),
+    Keyword(Vec<Record>),
+    Worldspace(Vec<WorldEntry>),
+    Cell(Vec<Cell>),
     Reference,
     Landscape,
     Action,
