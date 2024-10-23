@@ -8,7 +8,7 @@ pub enum TopGroup {
     GameSetting(Vec<Record>),
     Keyword(Vec<Record>),
     Worldspace(Vec<WorldEntry>),
-    Cell(Vec<Cell>),
+    Cell(Vec<Group>),
     Reference,
     Landscape,
     Action,

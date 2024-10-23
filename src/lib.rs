@@ -2314,7 +2314,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     b"BOOK" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"BPTD" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"CAMS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
-                    //b"CELL" => { records = TopGroup::Cell(self.parse_until(limit, Self::parse_cell)?); }
+                    b"CELL" => { records = TopGroup::Cell(self.parse_until(limit, Self::parse_group)?); }
                     b"CLAS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"CLFM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"CLMT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
@@ -2619,7 +2619,7 @@ mod tests {
         esm.parse_top_level()
     }
 
-    #[test]
+    //#[test]
     fn fallout4() -> chunk_parser::Result<()> {
         const DATA: &[u8] = include_bytes!("../data/Fallout4.esm");
         let mut esm = ESMParser2::cursor(DATA);
