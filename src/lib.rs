@@ -61,7 +61,7 @@ pub struct WorldEntry {
 
 #[derive(Debug)]
 pub struct WorldChildren {
-    pub cell: Cell,
+    pub cell: Option<Cell>,
     pub blocks: Vec<ExteriorCellBlock>
 }
 
@@ -2131,7 +2131,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         let header: RecordHeader = self.read()?;
         indentln!(self, "{:?}", header);
         match &header.type_id.0 {
-            b"REFR" | b"ACHR" | b"PHZD" | b"LAND" | b"NAVM" | b"PGRE" | b"PMIS" => {
+            b"REFR" | b"ACHR" | b"PHZD" | b"LAND" | b"NAVM" | b"PGRE" | b"PMIS" | b"ACRE" => {
                 // TODO handle decrompression
                 if header.flags & 0x40000000 != 0 {
                     self.skip(header.size as u64)?;
@@ -2323,9 +2323,11 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     b"COLL" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"CONT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"CPTH" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"CREA" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"CSTY" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"DEBR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"DFOB" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"DIAL" => { self.seek(limit)?; records = TopGroup::Skipped }
                     b"DLVW" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"DMGT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"DOBJ" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
@@ -2335,6 +2337,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     b"ENCH" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"EQUP" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"EXPL" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"EYES" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"FACT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"FLOR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"FLST" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
@@ -2345,6 +2348,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     b"GLOB" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"GMST" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"GRAS" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"HAIR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"HAZD" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"HDPT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"IDLE" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
@@ -2366,12 +2370,14 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     b"LIGH" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"LSCR" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"LTEX" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"LVLC" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"LVLI" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"LVLN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"MATO" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"MATT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"MESG" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"MGEF" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"MICN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"MISC" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"MOVT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"MSTT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
@@ -2389,7 +2395,8 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     b"PERK" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"PKIN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"PROJ" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
-                    //b"QUST" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"PWAT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"QUST" => { self.skip(limit)?; records = TopGroup::Skipped }
                     b"RACE" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"REGN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"RELA" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
@@ -2398,6 +2405,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     b"RFGP" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"SCCO" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"SCOL" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
+                    b"SCPT" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"SCSN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"SMBN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
                     b"SMEN" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
@@ -2423,6 +2431,7 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
                     b"ZOOM" => { records = TopGroup::Unhandled(self.parse_until(limit, Self::parse_record)?); }
 
                     _ => {
+                        panic!("Unexpected record type {}", id);
                         self.seek(limit)?;
                         indentln!(self, "Skipped");
                         records = TopGroup::Skipped;
@@ -2560,7 +2569,19 @@ impl<R> ESMParser2<R> where R: std::io::Read + std::io::Seek {
         
         indentln!(self, "{:?}", label);
         self.push();
-        let cell = self.parse_cell()?;
+
+        let next_id: FourCC = self.read()?;
+        self.rewind(4)?;
+
+        
+
+        let cell = if &next_id.0 == b"CELL" {
+            Some(self.parse_cell()?)
+        } else {
+            None
+        };
+
+        
 
         // TODO Push correct values to vector
         let blocks = Vec::new();
@@ -2612,7 +2633,7 @@ pub mod prelude {
 mod tests {
     use super::prelude::*;
 
-    #[test]
+    //#[test]
     fn zeta() -> chunk_parser::Result<()> {
         const DATA: &[u8] = include_bytes!("../data/Zeta.esm");
         let mut esm = ESMParser2::cursor(DATA);
@@ -2622,6 +2643,13 @@ mod tests {
     //#[test]
     fn fallout4() -> chunk_parser::Result<()> {
         const DATA: &[u8] = include_bytes!("../data/Fallout4.esm");
+        let mut esm = ESMParser2::cursor(DATA);
+        esm.parse_top_level()
+    }
+
+    #[test]
+    fn fallout3() -> chunk_parser::Result<()> {
+        const DATA: &[u8] = include_bytes!("../data/Fallout3.esm");
         let mut esm = ESMParser2::cursor(DATA);
         esm.parse_top_level()
     }
